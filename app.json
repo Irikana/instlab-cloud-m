@@ -1,0 +1,34 @@
+{
+  "expo": {
+    "name": "INSTLAB CLOUD M",
+    "slug": "instlab-cloud-m",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "instlab-cloud-m",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "icon": "./src/assets/icon.png",
+    "ios": {
+      "supportsTablet": true,
+      "icon": "./src/assets/icon.png"
+    },
+    "android": {
+      "package": "io.github.instlab.cloudm",
+      "icon": "./src/assets/icon.png",
+      "adaptiveIcon": {
+        "backgroundColor": "#1976D2",
+        "foregroundImage": "./src/assets/adaptive-icon.png"
+      }
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "server"
+    },
+    "plugins": [
+      "expo-router"
+    ],
+    "experiments": {
+      "tsconfigPaths": true
+    }
+  }
+}
