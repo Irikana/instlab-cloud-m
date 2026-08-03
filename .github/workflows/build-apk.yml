@@ -36,10 +36,21 @@ jobs:
 
       - name: Build Release APK (log to file)
         working-directory: android
-        run: ./gradlew assembleRelease --no-daemon --stacktrace 2>&1 | tee build.log
+        run: |
+          set -o pipefail
+          ./gradlew assembleRelease --no-daemon --stacktrace 2>&1 | tee build.log
         env:
           ANDROID_HOME: /usr/local/lib/android/sdk
           ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+
+      - name: Verify APK exists
+        run: |
+          if [ -f android/app/build/outputs/apk/release/app-release.apk ]; then
+            echo "APK 存在: $(ls -lh android/app/build/outputs/apk/release/app-release.apk | awk '{print $5}')"
+          else
+            echo "::error::APK 未生成，构建失败"
+            exit 1
+          fi
 
       - name: Upload build log (on failure)
         if: failure()
