@@ -2,7 +2,7 @@
   "expo": {
     "name": "INSTLAB CLOUD M",
     "slug": "instlab-cloud-m",
-    "version": "0.1.0",
+    "version": "0.0.1",
     "orientation": "portrait",
     "scheme": "instlab-cloud-m",
     "userInterfaceStyle": "automatic",
@@ -25,7 +25,15 @@
       "output": "server"
     },
     "plugins": [
-      "expo-router"
+      "expo-router",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
+      ]
     ],
     "experiments": {
       "tsconfigPaths": true

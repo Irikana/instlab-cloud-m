@@ -1,8 +1,11 @@
 // 设置页：主题切换（含 Cloud Lite 风格）+ 关于
 import React from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import Constants from 'expo-constants';
 import { useSettingsStore } from '../src/store/settings-store';
 import { SPACING, useTheme, type Palette, THEME_OPTIONS, type ThemeMode } from '../src/theme';
+
+const APP_VERSION = Constants.expoConfig?.version ?? '0.0.1';
 
 export default function SettingsScreen() {
   const themeMode = useSettingsStore((s) => s.themeMode);
@@ -35,7 +38,7 @@ export default function SettingsScreen() {
       <Text style={[s.sectionTitle, { marginTop: SPACING.lg }]}>关于</Text>
       <View style={s.aboutBox}>
         <Text style={s.aboutName}>INSTLAB CLOUD M</Text>
-        <Text style={s.aboutDesc}>移动端教学管理 v0.1.0</Text>
+        <Text style={s.aboutDesc}>移动端教学管理 v{APP_VERSION}</Text>
         <Text style={s.aboutLine}>
           基于 INSTLAB CLOUD Lite PC 客户端分析开发，兼容 cloud.instlab.cn API。
         </Text>

@@ -12,6 +12,8 @@ export default function LoginScreen() {
   const [studentId, setStudentId] = useState('');
   const [password, setPassword] = useState('');
   const [showPwd, setShowPwd] = useState(false);
+  const [showServerInput, setShowServerInput] = useState(false);
+  const [serverAddress, setServerAddress] = useState('');
 
   const handleLogin = async () => {
     if (!studentId.trim()) {
@@ -23,7 +25,7 @@ export default function LoginScreen() {
       return;
     }
     try {
-      await loginWithCredentials(studentId.trim(), password);
+      await loginWithCredentials(studentId.trim(), password, showServerInput ? serverAddress.trim() : undefined);
     } catch {
       // error displayed below
     }
@@ -74,6 +76,24 @@ export default function LoginScreen() {
         <View style={s.errorBox}>
           <Text style={s.errorText}>{error}</Text>
         </View>
+      )}
+
+      {/* 服务器地址（可折叠） */}
+      <Pressable style={s.serverToggle} onPress={() => setShowServerInput((v) => !v)}>
+        <Text style={s.serverToggleText}>
+          {showServerInput ? '▼' : '▶'} 服务器地址（可选，暑假在家请询问管理员）
+        </Text>
+      </Pressable>
+      {showServerInput && (
+        <TextInput
+          style={s.input}
+          value={serverAddress}
+          onChangeText={setServerAddress}
+          placeholder="例如 192.168.1.100 或 vpn.xxx.edu.cn"
+          placeholderTextColor={colors.textLight}
+          autoCapitalize="none"
+          autoCorrect={false}
+        />
       )}
 
       <Pressable
@@ -151,6 +171,11 @@ const createStyles = (COLORS: Palette) =>
     },
     btnDisabled: { opacity: 0.5 },
     loginBtnText: { color: '#fff', fontSize: 16, fontWeight: '600' },
+    serverToggle: {
+      paddingVertical: SPACING.sm,
+      marginBottom: SPACING.xs,
+    },
+    serverToggleText: { fontSize: 13, color: COLORS.accent, fontWeight: '500' },
     tipBox: {
       marginTop: SPACING.xl,
       padding: SPACING.md,

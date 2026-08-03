@@ -13,8 +13,8 @@ interface AuthState {
   error: string | null;
 
   init: () => Promise<void>;
-  /** 学号+密码登录 */
-  loginWithCredentials: (studentId: string, password: string) => Promise<void>;
+  /** 学号+密码登录，可选指定服务器地址（留空则自动获取） */
+  loginWithCredentials: (studentId: string, password: string, serverAddress?: string) => Promise<void>;
   logout: () => Promise<void>;
   clearError: () => void;
 }
@@ -38,18 +38,25 @@ export const useAuthStore = create<AuthState>((set) => ({
     set({ isAuthenticated: true, loading: false });
   },
 
-  loginWithCredentials: async (studentId: string, password: string) => {
+  loginWithCredentials: async (studentId: string, password: string, serverAddress?: string) => {
     set({ loading: true, error: null });
     try {
-      // Step 1: 从 cloud.instlab.cn 获取内网服务器地址
-      const userResp = await fetch(`${API_CONFIG.baseURL}/api/userinfo`);
-      if (!userResp.ok) throw new Error('无法连接服务器，请检查网络');
-      const userData = await userResp.json();
-      const server = userData.server;
-      if (!server) throw new Error('未获取到服务器地址');
+      let server = serverAddress?.trim() || '';
+      let fetchedRole = '';
 
-      // Step 2: 用学号和密码登录内网服务器
-      const loginResp = await fetch(`http://${server}/login`, {
+      if (!server) {
+        // Step 1: 从 cloud.instlab.cn 获取内网服务器地址
+        const userResp = await fetch(`${API_CONFIG.baseURL}/api/userinfo`);
+        if (!userResp.ok) throw new Error('无法连接 cloud.instlab.cn，请检查网络或手动输入服务器地址');
+        const userData = await userResp.json();
+        server = userData.server;
+        if (!server) throw new Error('未获取到服务器地址');
+        fetchedRole = userData.role || '';
+      }
+
+      // Step 2: 用学号和密码登录服务器（兼容 http/https）
+      const protocol = server.includes('://') ? '' : 'http://';
+      const loginResp = await fetch(`${protocol}${server}/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userid: studentId, password }),
@@ -70,7 +77,7 @@ export const useAuthStore = create<AuthState>((set) => ({
         isAuthenticated: true,
         login: studentId,
         userName: loginData.name || studentId,
-        userRole: userData.role || '',
+        userRole: fetchedRole,
         serverAddr: server,
         loading: false,
         error: null,
