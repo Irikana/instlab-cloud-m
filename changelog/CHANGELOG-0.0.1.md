@@ -9,15 +9,25 @@
 - **0.1.0 永久保留给纪念版**，未来不再使用该版本号
 - 版本演进：0.0.1 → 0.0.2 → … → 0.0.x → **0.1.1** → 0.1.2 → …（从 0.0.x 升到 0.1.x 时从 0.1.1 开始）
 
-### 修复
-- **Android 明文 HTTP 访问**：Android 9+ 默认禁止 `http://` 明文流量，导致连接内网服务器（`http://{server}/login`）被系统直接拦截、提示"无法连接服务器"。已通过 `expo-build-properties` 开启 `usesCleartextTraffic`，允许访问校园网内的 HTTP 服务。
-- **登录服务器地址可选**：登录页新增可折叠的「服务器地址」输入框。默认自动从 `cloud.instlab.cn` 获取服务器地址；若自动获取失败（如在校外），可手动填写服务器地址（兼容 http/https，支持带端口或 VPN 域名）。
-- 登录失败时的错误提示更明确（区分"无法连接 cloud.instlab.cn"与"学号或密码错误"）。
+### 登录功能重构（关键修复）
+通过逆向分析 cloud.instlab.cn 前端 JS（CloudLayout chunk），还原了**真实的 PC 端登录流程**：
+1. `GET /api/token?id=instlab_cloud_wechat&secret=...&seed={随机}` → 获取 app token cookie
+2. `GET /api/captcha` → 获取 **SVG 验证码**（128×40）
+3. `POST /api/login` → `{userid, password, captcha, univer}` → 返回用户信息
 
-### 变更
-- 版本号从 0.1.0 → 0.0.1（重编号）
-- 设置页「关于」版本号改为从 `app.json` 动态读取，避免硬编码
+**之前的错误**：旧版直接 `GET /api/userinfo`（该路径不存在，返回 404）且完全没有验证码步骤，导致登录必然失败。
+
+**本次变更**：
+- 新增 cookie 管理模块（`src/lib/cookies.ts`），手动管理 token/captcha/session cookie
+- 重写 `auth-store.ts`：实现 token → captcha → login 完整流程
+- 重写登录页：新增**验证码输入框 + SVG 验证码显示**（react-native-svg 渲染）、**学校代码输入框**（默认 jssnu = 江苏师范大学）
+- 登录失败自动刷新验证码
+- 确认 API 全部位于公网 `cloud.instlab.cn`，**无需校园内网**（PC 在家能登录正是因为如此）
+
+### 其他
+- **Android 明文 HTTP 访问**：开启 `usesCleartextTraffic`（兼容内网 HTTP 场景）
+- 设置页版本号改为从 app.json 动态读取
 
 ### 说明
-- 首页/登录页的 Logo 与图标均为纯代码绘制（无第三方图片素材），无版权问题。
-- 设置页「关于」新增学习用途声明。
+- 首页/登录页 Logo 为纯代码绘制，无版权问题
+- 设置页「关于」含学习用途声明

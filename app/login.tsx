@@ -1,35 +1,61 @@
-// 登录页 — 学号 + 密码
-import React, { useState } from 'react';
+// 登录页 — 学号 + 密码 + 验证码（SVG）+ 学校代码
+import React, { useState, useEffect } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import Svg, { Path } from 'react-native-svg';
 import { useAuthStore } from '../src/store/auth-store';
 import { SPACING, useTheme, type Palette } from '../src/theme';
 
+/** 解析 SVG 字符串中的 path 元素（简化解析：提取所有 d 属性） */
+function extractPaths(svg: string): { d: string; fill?: string; transform?: string }[] {
+  const paths: { d: string; fill?: string }[] = [];
+  const re = /<path\b([^>]*)>/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(svg)) !== null) {
+    const attrs = m[1];
+    const d = /d="([^"]*)"/.exec(attrs);
+    const fill = /fill="([^"]*)"/.exec(attrs);
+    if (d) {
+      paths.push({ d: d[1], fill: fill ? fill[1] : undefined });
+    }
+  }
+  return paths;
+}
+
 export default function LoginScreen() {
-  const { loginWithCredentials, loading, error, clearError } = useAuthStore();
+  const { loginWithCredentials, fetchCaptcha, loading, error, clearError, captchaSvg } = useAuthStore();
   const { isDark, colors } = useTheme();
   const s = createStyles(colors);
 
   const [studentId, setStudentId] = useState('');
   const [password, setPassword] = useState('');
+  const [captcha, setCaptcha] = useState('');
+  const [univer, setUniver] = useState('jssnu');
   const [showPwd, setShowPwd] = useState(false);
-  const [showServerInput, setShowServerInput] = useState(false);
-  const [serverAddress, setServerAddress] = useState('');
+
+  // 页面加载时获取验证码
+  useEffect(() => {
+    fetchCaptcha().catch(() => {});
+  }, [fetchCaptcha]);
+
+  const handleRefreshCaptcha = () => {
+    setCaptcha('');
+    fetchCaptcha().catch(() => {});
+  };
 
   const handleLogin = async () => {
-    if (!studentId.trim()) {
-      Alert.alert('提示', '请输入学号');
-      return;
-    }
-    if (!password) {
-      Alert.alert('提示', '请输入密码');
-      return;
-    }
+    if (!studentId.trim()) { Alert.alert('提示', '请输入学号或工号'); return; }
+    if (!password) { Alert.alert('提示', '请输入密码'); return; }
+    if (!captcha.trim()) { Alert.alert('提示', '请输入验证码'); return; }
+    if (!univer.trim()) { Alert.alert('提示', '请输入学校代码'); return; }
     try {
-      await loginWithCredentials(studentId.trim(), password, showServerInput ? serverAddress.trim() : undefined);
+      await loginWithCredentials(studentId.trim(), password, captcha.trim(), univer.trim());
     } catch {
-      // error displayed below
+      // 失败后自动刷新验证码
+      handleRefreshCaptcha();
     }
   };
+
+  const svgPaths = captchaSvg ? extractPaths(captchaSvg) : [];
 
   return (
     <ScrollView style={s.container} contentContainerStyle={s.content}>
@@ -41,20 +67,19 @@ export default function LoginScreen() {
         <Text style={s.subtitle}>移动端教学管理</Text>
       </View>
 
-      {/* 学号输入 */}
-      <Text style={s.label}>学号</Text>
+      {/* 学号 */}
+      <Text style={s.label}>学号 / 工号</Text>
       <TextInput
         style={s.input}
         value={studentId}
         onChangeText={(v) => { setStudentId(v); if (error) clearError(); }}
-        placeholder="请输入学号"
+        placeholder="请输入学号或工号"
         placeholderTextColor={colors.textLight}
         autoCapitalize="none"
         autoCorrect={false}
-        keyboardType="default"
       />
 
-      {/* 密码输入 */}
+      {/* 密码 */}
       <Text style={s.label}>密码</Text>
       <View style={s.inputRow}>
         <TextInput
@@ -72,28 +97,47 @@ export default function LoginScreen() {
         </Pressable>
       </View>
 
+      {/* 学校代码 */}
+      <Text style={s.label}>学校代码</Text>
+      <TextInput
+        style={s.input}
+        value={univer}
+        onChangeText={setUniver}
+        placeholder="例如 jssnu（江苏师范大学）"
+        placeholderTextColor={colors.textLight}
+        autoCapitalize="none"
+        autoCorrect={false}
+      />
+
+      {/* 验证码 */}
+      <Text style={s.label}>验证码</Text>
+      <View style={s.captchaRow}>
+        <TextInput
+          style={[s.input, { flex: 1, borderRightWidth: 0 }]}
+          value={captcha}
+          onChangeText={(v) => { setCaptcha(v); if (error) clearError(); }}
+          placeholder="输入右侧验证码"
+          placeholderTextColor={colors.textLight}
+          autoCapitalize="characters"
+          autoCorrect={false}
+        />
+        <Pressable style={s.captchaBox} onPress={handleRefreshCaptcha}>
+          {svgPaths.length > 0 ? (
+            <Svg width={128} height={40} viewBox="0 0 128 40">
+              {svgPaths.map((p, i) => (
+                <Path key={i} d={p.d} fill={p.fill ?? '#1a1a1a'} />
+              ))}
+            </Svg>
+          ) : (
+            <Text style={s.captchaLoading}>{loading ? '加载中…' : '点击刷新'}</Text>
+          )}
+        </Pressable>
+      </View>
+
       {error && (
         <View style={s.errorBox}>
           <Text style={s.errorText}>{error}</Text>
         </View>
-      )}
-
-      {/* 服务器地址（可折叠） */}
-      <Pressable style={s.serverToggle} onPress={() => setShowServerInput((v) => !v)}>
-        <Text style={s.serverToggleText}>
-          {showServerInput ? '▼' : '▶'} 服务器地址（可选，暑假在家请询问管理员）
-        </Text>
-      </Pressable>
-      {showServerInput && (
-        <TextInput
-          style={s.input}
-          value={serverAddress}
-          onChangeText={setServerAddress}
-          placeholder="例如 192.168.1.100 或 vpn.xxx.edu.cn"
-          placeholderTextColor={colors.textLight}
-          autoCapitalize="none"
-          autoCorrect={false}
-        />
       )}
 
       <Pressable
@@ -101,17 +145,19 @@ export default function LoginScreen() {
         onPress={handleLogin}
         disabled={loading}
       >
-        <Text style={s.loginBtnText}>
-          {loading ? '登录中…' : '登录'}
-        </Text>
+        <Text style={s.loginBtnText}>{loading ? '登录中…' : '登录'}</Text>
+      </Pressable>
+
+      <Pressable style={s.linkBtn} onPress={handleRefreshCaptcha} disabled={loading}>
+        <Text style={s.linkText}>看不清？刷新验证码</Text>
       </Pressable>
 
       <View style={s.tipBox}>
         <Text style={s.tipTitle}>安全说明</Text>
-        <Text style={s.tipText}>• 使用你在实验室 PC 端相同的学号和密码</Text>
-        <Text style={s.tipText}>• 密码加密传输，不在设备本地保存明文</Text>
-        <Text style={s.tipText}>• Token 加密存储于设备安全区</Text>
-        <Text style={s.tipText}>• 需连接校园内网或配置 VPN</Text>
+        <Text style={s.tipText}>• 使用与 PC 端相同的学号和密码</Text>
+        <Text style={s.tipText}>• 学校代码为你的学校在 INSTLAB 中的代码（默认 jssnu）</Text>
+        <Text style={s.tipText}>• 登录凭证加密存储于设备安全区</Text>
+        <Text style={s.tipText}>• 连接 cloud.instlab.cn 公网服务，无需校园内网</Text>
       </View>
     </ScrollView>
   );
@@ -155,6 +201,18 @@ const createStyles = (COLORS: Palette) =>
       backgroundColor: COLORS.bgMuted,
     },
     eyeText: { fontSize: 13, color: COLORS.textSecondary },
+    captchaRow: { flexDirection: 'row', alignItems: 'stretch', marginBottom: SPACING.md },
+    captchaBox: {
+      borderWidth: 1,
+      borderLeftWidth: 0,
+      borderColor: COLORS.border,
+      backgroundColor: COLORS.bgMuted,
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: SPACING.sm,
+      minWidth: 140,
+    },
+    captchaLoading: { fontSize: 12, color: COLORS.textLight },
     errorBox: {
       backgroundColor: COLORS.dangerBg,
       borderLeftWidth: 4,
@@ -171,11 +229,8 @@ const createStyles = (COLORS: Palette) =>
     },
     btnDisabled: { opacity: 0.5 },
     loginBtnText: { color: '#fff', fontSize: 16, fontWeight: '600' },
-    serverToggle: {
-      paddingVertical: SPACING.sm,
-      marginBottom: SPACING.xs,
-    },
-    serverToggleText: { fontSize: 13, color: COLORS.accent, fontWeight: '500' },
+    linkBtn: { alignItems: 'center', marginTop: SPACING.sm },
+    linkText: { color: COLORS.accent, fontSize: 13 },
     tipBox: {
       marginTop: SPACING.xl,
       padding: SPACING.md,
