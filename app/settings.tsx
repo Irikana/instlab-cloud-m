@@ -42,6 +42,12 @@ export default function SettingsScreen() {
         <Text style={s.aboutLine}>
           「Cloud Lite」主题仿自 PC 客户端的前端配色方案。
         </Text>
+        <View style={s.disclaimerBox}>
+          <Text style={s.disclaimerTitle}>声明</Text>
+          <Text style={s.disclaimerText}>
+            本软件由在校学生基于学习目的自行开发，与 INSTLAB 官方无关。仅供个人学习参考，请勿用于商业用途。使用本软件所产生的任何问题与责任均由使用者自行承担。
+          </Text>
+        </View>
       </View>
     </ScrollView>
   );
@@ -83,4 +89,13 @@ const createStyles = (COLORS: Palette) =>
     aboutName: { fontSize: 16, fontWeight: '700', color: COLORS.accent },
     aboutDesc: { fontSize: 13, color: COLORS.textSecondary, marginTop: 4 },
     aboutLine: { fontSize: 12, color: COLORS.textLight, marginTop: SPACING.sm, lineHeight: 18 },
+    disclaimerBox: {
+      marginTop: SPACING.md,
+      padding: SPACING.sm + 2,
+      backgroundColor: COLORS.warning + '15',
+      borderLeftWidth: 4,
+      borderLeftColor: COLORS.warning,
+    },
+    disclaimerTitle: { fontSize: 12, fontWeight: '600', color: COLORS.warning, marginBottom: 4 },
+    disclaimerText: { fontSize: 11, color: COLORS.textSecondary, lineHeight: 17 },
   });
