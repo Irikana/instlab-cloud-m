@@ -41,31 +41,17 @@ const WEEK_CN = ['日', '一', '二', '三', '四', '五', '六'];
 export function buildFullHtml(html: string, data: Record<string, unknown>, titlelogo?: string): string {
   let out = html;
 
-  // ---- 底版背景：把 titlelogo 作为 body 背景 ----
+  // ---- 顶部横幅：titlelogo 是作业纸顶部横幅（学校 logo + 「课程作业」标题），
+  //      非全页背景。PC 端显示为：宽约 60.8mm × 高约 18.5mm，位于页面顶部左侧。----
   if (titlelogo && titlelogo.startsWith('iVBOR')) {
-    const bgStyle = `<style>
-      html, body {
-        margin: 0; padding: 0;
-      }
-      body {
-        background-image: url('data:image/png;base64,${titlelogo}');
-        background-size: 210mm 297mm;
-        background-position: top left;
-        background-repeat: no-repeat;
-        min-height: 297mm;
-      }
-      .content-overlay {
-        position: relative;
-        width: 210mm;
-        min-height: 297mm;
-        margin: 0 auto;
-      }
-    </style>`;
-    // 在 </head> 前注入背景样式 + 包裹 body 内容
-    out = out.replace('</head>', bgStyle + '</head>');
-    // 把 body 内容用 content-overlay 包裹
-    out = out.replace('<body>', '<body><div class="content-overlay">');
-    out = out.replace('</body>', '</div></body>');
+    // 在 body 开头插入 titlelogo 横幅 + 条形码占位
+    const banner = `<div style="width: 100%; margin: 0; padding: 0; text-align: left;">
+      <img src="data:image/png;base64,${titlelogo}"
+           style="width: 60.8mm; height: 18.5mm; display: block;" />
+    </div>
+    <div style="height: 5mm"></div>`;
+    // 在 <body> 后插入横幅（在现有第一个 div 之前）
+    out = out.replace('<body>', '<body>\n' + banner);
   }
 
   // ---- 字体兼容 ----
