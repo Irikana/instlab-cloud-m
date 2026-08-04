@@ -34,6 +34,8 @@ export default function PaperDownloadScreen() {
   const { colors } = useTheme();
   const s = createStyles(colors);
   const login = useAuthStore((st) => st.login);
+  const userName = useAuthStore((st) => st.userName);
+  const userRole = useAuthStore((st) => st.userRole);
 
   // 模式
   const [mode, setMode] = useState<Mode>('calendar');
@@ -386,6 +388,11 @@ export default function PaperDownloadScreen() {
           </Pressable>
 
           <View style={s.tipBox}>
+            <Text style={s.tipTitle}>调试信息</Text>
+            <Text style={s.tipText}>用户：{userName || '?'} ｜ 学号：{login ?? '?'} ｜ role：{userRole ?? '?'}</Text>
+          </View>
+
+          <View style={[s.tipBox, { marginTop: SPACING.sm }]}>
             <Text style={s.tipTitle}>API 说明</Text>
             <Text style={s.tipText}>• POST /api/paper/work {`{ type: 8, data: { schid } }`}</Text>
             <Text style={s.tipText}>• POST /api/paper/workcorr {`{ type: 82, data: { schid } }`}</Text>
