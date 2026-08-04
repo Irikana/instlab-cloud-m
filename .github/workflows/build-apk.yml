@@ -8,6 +8,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: write
     steps:
@@ -25,6 +26,16 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
+      - name: Cache Gradle dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
       - name: Install dependencies
         run: npm ci --legacy-peer-deps
 
@@ -33,6 +44,14 @@ jobs:
 
       - name: Generate native Android project
         run: npx expo prebuild --platform android --no-install --clean
+
+      - name: Cache Android NDK
+        uses: actions/cache@v4
+        with:
+          path: /usr/local/lib/android/sdk/ndk
+          key: ${{ runner.os }}-ndk-27.1.12297006
+          restore-keys: |
+            ${{ runner.os }}-ndk-
 
       - name: Build Release APK (log to file)
         working-directory: android
