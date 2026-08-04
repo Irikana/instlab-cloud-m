@@ -71,6 +71,12 @@ export default function HomeScreen() {
       enabled: false,
     },
     {
+      title: '检查更新',
+      desc: '查看最新版本、下载 APK、访问官网',
+      href: '/updates',
+      enabled: true,
+    },
+    {
       title: '设置',
       desc: '主题切换、账户信息、关于',
       href: '/settings',

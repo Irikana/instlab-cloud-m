@@ -16,7 +16,7 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   init: async () => {
     try {
       const v = await AsyncStorage.getItem(THEME_KEY);
-      if (v === 'light' || v === 'dark' || v === 'cloud' || v === 'cloud-dark' || v === 'system') {
+      if (v === 'light' || v === 'dark' || v === 'quasar' || v === 'cloud' || v === 'cloud-dark' || v === 'system') {
         set({ themeMode: v });
       }
     } catch {

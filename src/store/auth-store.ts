@@ -3,12 +3,16 @@
 // 2. GET /api/captcha  → 返回 SVG 验证码，种 captcha cookie
 // 3. POST /api/login {userid, password, captcha, univer} → 返回 userinfo
 import { create } from 'zustand';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { deleteToken, getToken, setToken } from '../lib/auth';
 import { saveCookiesFromResponse, cookieHeader, clearCookies } from '../lib/cookies';
 
 const API_BASE = 'https://cloud.instlab.cn';
 const APP_ID = 'instlab_cloud_wechat';
 const APP_SECRET = 'c98068bd35694260ba49f11fee86c0b7';
+
+/** 用户信息缓存 key（重新进入 App 时恢复姓名/角色，无需重新登录） */
+const USERINFO_KEY = 'instab-cloud-userinfo';
 
 interface AuthState {
   isAuthenticated: boolean | null; // null = 初始化中
@@ -47,6 +51,25 @@ export const useAuthStore = create<AuthState>((set) => ({
     if (!token) {
       set({ isAuthenticated: false });
       return;
+    }
+    // 从缓存恢复用户信息（姓名/角色/学号/学校），避免重进丢失
+    try {
+      const raw = await AsyncStorage.getItem(USERINFO_KEY);
+      if (raw) {
+        const u = JSON.parse(raw);
+        set({
+          isAuthenticated: true,
+          loading: false,
+          login: u.login ?? null,
+          userName: u.userName ?? null,
+          userRole: u.userRole ?? null,
+          isTeacher: !!u.isTeacher,
+          univer: u.univer ?? null,
+        });
+        return;
+      }
+    } catch {
+      // 缓存损坏则忽略
     }
     set({ isAuthenticated: true, loading: false });
   },
@@ -114,13 +137,22 @@ export const useAuthStore = create<AuthState>((set) => ({
       // 保存 token（用 userinfo 或 cookie 中的 token 字段）
       const token = cookieHeader() || String(userinfo.id || '');
       await setToken(token);
-      set({
-        isAuthenticated: true,
+      const profile = {
         login: studentId,
         userName: realName || studentId,
         userRole: realRole,
         isTeacher,
         univer,
+      };
+      // 缓存用户信息，重新进入 App 时恢复
+      try {
+        await AsyncStorage.setItem(USERINFO_KEY, JSON.stringify(profile));
+      } catch {
+        // 缓存失败不阻塞登录
+      }
+      set({
+        isAuthenticated: true,
+        ...profile,
         loading: false,
         error: null,
       });
@@ -133,6 +165,11 @@ export const useAuthStore = create<AuthState>((set) => ({
   logout: async () => {
     await deleteToken();
     clearCookies();
+    try {
+      await AsyncStorage.removeItem(USERINFO_KEY);
+    } catch {
+      // 忽略
+    }
     set({
       isAuthenticated: false,
       login: null,

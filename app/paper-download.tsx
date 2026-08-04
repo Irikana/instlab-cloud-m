@@ -14,7 +14,7 @@ import {
   View,
 } from 'react-native';
 import { useAuthStore } from '../src/store/auth-store';
-import { SPACING, useTheme, type Palette } from '../src/theme';
+import { SPACING, useTheme, type Palette, CALENDAR_COLORS } from '../src/theme';
 import {
   fetchScheduleEntries,
   fetchTermList,
@@ -24,7 +24,7 @@ import {
   WEEK_LABELS,
   type ScheduleEntry,
 } from '../src/lib/schedule';
-import { downloadPaperPdf, type PaperKind } from '../src/lib/paper';
+import { downloadPaperPdf, downloadPaperHtml, type PaperKind } from '../src/lib/paper';
 
 type Mode = 'calendar' | 'schid';
 
@@ -145,8 +145,8 @@ export default function PaperDownloadScreen() {
   const dateKeyOf = (day: number) => `${viewYear}-${pad2(viewMonth + 1)}-${pad2(day)}`;
 
   /** 下载作业纸（从日程条目） */
-  const handleEntryDownload = async (entry: ScheduleEntry, kind: PaperKind) => {
-    const key = `${entry.schid}-${kind}`;
+  const handleEntryDownload = async (entry: ScheduleEntry, kind: PaperKind, fmt: 'pdf' | 'html' = 'pdf') => {
+    const key = `${entry.schid}-${kind}-${fmt}`;
     setDownloadingKey(key);
     try {
       const schData: Record<string, unknown> = {
@@ -154,14 +154,25 @@ export default function PaperDownloadScreen() {
         planid: entry.planid ?? '',
         planexpid: entry.planexpid ?? '',
       };
-      const fileName = `${kind === 'work' ? '空白作业纸' : '批改后作业纸'}_${entry.title}_${entry.date}.pdf`;
-      const res = await downloadPaperPdf(kind, schData, fileName);
-      Alert.alert(
-        'PDF 已生成',
-        res.shared
-          ? '请在系统分享面板中选择保存位置。\n\n' + res.uri
-          : '文件已生成：\n' + res.uri,
-      );
+      const label = kind === 'work' ? '空白作业纸' : '批改后作业纸';
+      const fileName = `${label}_${entry.title}_${entry.date}.${fmt}`;
+      if (fmt === 'html') {
+        const res = await downloadPaperHtml(kind, schData, fileName);
+        Alert.alert(
+          'HTML 已生成',
+          res.shared
+            ? '请在系统分享面板中选择保存位置。\n\n' + res.uri
+            : '文件已生成：\n' + res.uri,
+        );
+      } else {
+        const res = await downloadPaperPdf(kind, schData, fileName);
+        Alert.alert(
+          'PDF 已生成',
+          res.shared
+            ? '请在系统分享面板中选择保存位置。\n\n' + res.uri
+            : '文件已生成：\n' + res.uri,
+        );
+      }
     } catch (e) {
       Alert.alert('下载失败', (e as Error).message);
     } finally {
@@ -170,22 +181,33 @@ export default function PaperDownloadScreen() {
   };
 
   /** 下载作业纸（schid 测试模式） */
-  const handleSchidDownload = async (kind: PaperKind) => {
+  const handleSchidDownload = async (kind: PaperKind, fmt: 'pdf' | 'html' = 'pdf') => {
     const id = scheduleId.trim();
     if (!id) {
       Alert.alert('提示', '请输入实验安排ID（schid）');
       return;
     }
-    setDownloadingKey('schid-' + kind);
+    setDownloadingKey('schid-' + kind + '-' + fmt);
     try {
-      const fileName = `${kind === 'work' ? '空白作业纸' : '批改后作业纸'}_${id}.pdf`;
-      const res = await downloadPaperPdf(kind, { schid: id }, fileName);
-      Alert.alert(
-        'PDF 已生成',
-        res.shared
-          ? '请在系统分享面板中选择保存位置。\n\n' + res.uri
-          : '文件已生成：\n' + res.uri,
-      );
+      const label = kind === 'work' ? '空白作业纸' : '批改后作业纸';
+      const fileName = `${label}_${id}.${fmt}`;
+      if (fmt === 'html') {
+        const res = await downloadPaperHtml(kind, { schid: id }, fileName);
+        Alert.alert(
+          'HTML 已生成',
+          res.shared
+            ? '请在系统分享面板中选择保存位置。\n\n' + res.uri
+            : '文件已生成：\n' + res.uri,
+        );
+      } else {
+        const res = await downloadPaperPdf(kind, { schid: id }, fileName);
+        Alert.alert(
+          'PDF 已生成',
+          res.shared
+            ? '请在系统分享面板中选择保存位置。\n\n' + res.uri
+            : '文件已生成：\n' + res.uri,
+        );
+      }
     } catch (e) {
       Alert.alert('下载失败', (e as Error).message);
     } finally {
@@ -348,25 +370,36 @@ export default function PaperDownloadScreen() {
 
                   <View style={s.entryActions}>
                     <Pressable
-                      style={[s.dlBtn, (busy || downloadingKey === `${entry.schid}-work`) && s.btnDisabled]}
+                      style={[s.dlBtn, (busy || downloadingKey === `${entry.schid}-work-pdf`) && s.btnDisabled]}
                       disabled={busy}
-                      onPress={() => handleEntryDownload(entry, 'work')}
+                      onPress={() => handleEntryDownload(entry, 'work', 'pdf')}
                     >
-                      {downloadingKey === `${entry.schid}-work` ? (
+                      {downloadingKey === `${entry.schid}-work-pdf` ? (
                         <ActivityIndicator size="small" color="#fff" />
                       ) : (
-                        <Text style={s.dlBtnText}>下载空白作业纸</Text>
+                        <Text style={s.dlBtnText}>空白PDF</Text>
                       )}
                     </Pressable>
                     <Pressable
-                      style={[s.dlBtnSecondary, (busy || downloadingKey === `${entry.schid}-workcorr`) && s.btnDisabled]}
+                      style={[s.dlBtnSecondary, (busy || downloadingKey === `${entry.schid}-workcorr-pdf`) && s.btnDisabled]}
                       disabled={busy}
-                      onPress={() => handleEntryDownload(entry, 'workcorr')}
+                      onPress={() => handleEntryDownload(entry, 'workcorr', 'pdf')}
                     >
-                      {downloadingKey === `${entry.schid}-workcorr` ? (
+                      {downloadingKey === `${entry.schid}-workcorr-pdf` ? (
                         <ActivityIndicator size="small" color={colors.accent} />
                       ) : (
-                        <Text style={s.dlBtnSecondaryText}>批改后</Text>
+                        <Text style={s.dlBtnSecondaryText}>批改PDF</Text>
+                      )}
+                    </Pressable>
+                    <Pressable
+                      style={[s.dlBtnOutline, (busy || downloadingKey === `${entry.schid}-work-html`) && s.btnDisabled]}
+                      disabled={busy}
+                      onPress={() => handleEntryDownload(entry, 'work', 'html')}
+                    >
+                      {downloadingKey === `${entry.schid}-work-html` ? (
+                        <ActivityIndicator size="small" color={colors.textSecondary} />
+                      ) : (
+                        <Text style={s.dlBtnOutlineText}>原始HTML</Text>
                       )}
                     </Pressable>
                   </View>
@@ -397,29 +430,55 @@ export default function PaperDownloadScreen() {
             keyboardType="number-pad"
           />
 
-          <Pressable
-            style={[s.actionBtn, downloadingKey !== null && s.btnDisabled]}
-            disabled={downloadingKey !== null}
-            onPress={() => handleSchidDownload('work')}
-          >
-            {downloadingKey === 'schid-work' ? (
-              <ActivityIndicator size="small" color="#fff" />
-            ) : (
-              <Text style={s.actionBtnText}>下载空白作业纸</Text>
-            )}
-          </Pressable>
+          <View style={s.schidRow}>
+            <Pressable
+              style={[s.actionBtn, { flex: 1 }, downloadingKey !== null && s.btnDisabled]}
+              disabled={downloadingKey !== null}
+              onPress={() => handleSchidDownload('work', 'pdf')}
+            >
+              {downloadingKey === 'schid-work-pdf' ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Text style={s.actionBtnText}>空白PDF</Text>
+              )}
+            </Pressable>
+            <Pressable
+              style={[s.actionBtnSecondary, { flex: 1 }, downloadingKey !== null && s.btnDisabled]}
+              disabled={downloadingKey !== null}
+              onPress={() => handleSchidDownload('workcorr', 'pdf')}
+            >
+              {downloadingKey === 'schid-workcorr-pdf' ? (
+                <ActivityIndicator size="small" color={colors.accent} />
+              ) : (
+                <Text style={s.actionBtnSecondaryText}>批改PDF</Text>
+              )}
+            </Pressable>
+          </View>
 
-          <Pressable
-            style={[s.actionBtnSecondary, downloadingKey !== null && s.btnDisabled]}
-            disabled={downloadingKey !== null}
-            onPress={() => handleSchidDownload('workcorr')}
-          >
-            {downloadingKey === 'schid-workcorr' ? (
-              <ActivityIndicator size="small" color={colors.accent} />
-            ) : (
-              <Text style={s.actionBtnSecondaryText}>下载批改后作业纸</Text>
-            )}
-          </Pressable>
+          <View style={s.schidRow}>
+            <Pressable
+              style={[s.actionBtnOutline, { flex: 1 }, downloadingKey !== null && s.btnDisabled]}
+              disabled={downloadingKey !== null}
+              onPress={() => handleSchidDownload('work', 'html')}
+            >
+              {downloadingKey === 'schid-work-html' ? (
+                <ActivityIndicator size="small" color={colors.textSecondary} />
+              ) : (
+                <Text style={s.actionBtnOutlineText}>空白HTML</Text>
+              )}
+            </Pressable>
+            <Pressable
+              style={[s.actionBtnOutline, { flex: 1 }, downloadingKey !== null && s.btnDisabled]}
+              disabled={downloadingKey !== null}
+              onPress={() => handleSchidDownload('workcorr', 'html')}
+            >
+              {downloadingKey === 'schid-workcorr-html' ? (
+                <ActivityIndicator size="small" color={colors.textSecondary} />
+              ) : (
+                <Text style={s.actionBtnOutlineText}>批改HTML</Text>
+              )}
+            </Pressable>
+          </View>
 
           <View style={s.tipBox}>
             <Text style={s.tipTitle}>调试信息</Text>
@@ -502,9 +561,9 @@ const createStyles = (COLORS: Palette) =>
       justifyContent: 'center',
     },
     // PC 端日历事件色：实验=orange、理论=blue、都有=purple
-    dayCircleOrange: { backgroundColor: '#ff9800' },
-    dayCircleBlue: { backgroundColor: '#2196f3' },
-    dayCirclePurple: { backgroundColor: '#9c27b0' },
+    dayCircleOrange: { backgroundColor: CALENDAR_COLORS.experiment },
+    dayCircleBlue: { backgroundColor: CALENDAR_COLORS.homework },
+    dayCirclePurple: { backgroundColor: CALENDAR_COLORS.all },
     dayCircleSelected: { borderWidth: 2, borderColor: COLORS.accent, backgroundColor: COLORS.accent },
     dayCircleToday: { borderWidth: 1.5, borderColor: COLORS.accent },
     dayNum: { fontSize: 14, color: COLORS.text },
@@ -565,6 +624,15 @@ const createStyles = (COLORS: Palette) =>
       alignItems: 'center',
     },
     dlBtnSecondaryText: { color: COLORS.accent, fontSize: 13, fontWeight: '600' },
+    dlBtnOutline: {
+      flex: 1,
+      borderWidth: 1,
+      borderColor: COLORS.borderDark,
+      paddingVertical: SPACING.sm - 1,
+      alignItems: 'center',
+      marginLeft: SPACING.sm,
+    },
+    dlBtnOutlineText: { color: COLORS.textSecondary, fontSize: 12, fontWeight: '600' },
     btnDisabled: { opacity: 0.5 },
 
     // 空态 / 错误
@@ -609,6 +677,14 @@ const createStyles = (COLORS: Palette) =>
       marginBottom: SPACING.md,
     },
     actionBtnSecondaryText: { color: COLORS.accent, fontSize: 16, fontWeight: '600' },
+    schidRow: { flexDirection: 'row', gap: SPACING.sm, marginBottom: SPACING.sm },
+    actionBtnOutline: {
+      borderWidth: 1,
+      borderColor: COLORS.borderDark,
+      padding: SPACING.md,
+      alignItems: 'center',
+    },
+    actionBtnOutlineText: { color: COLORS.textSecondary, fontSize: 14, fontWeight: '600' },
     tipBox: {
       marginTop: SPACING.md,
       padding: SPACING.md,

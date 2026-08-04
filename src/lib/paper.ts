@@ -2,9 +2,11 @@
 // 1. POST /api/paper/work     {type:8}    → {html, data, h2pargs, titlelogo}
 // 2. POST /api/paper/workcorr {type:82}   → 同上（批改后作业纸）
 // 3. 本地渲染 HTML → expo-print 生成 PDF → expo-sharing 分享/保存
+//    也可直接下载原始 HTML 文件（排错用）
 import { Platform } from 'react-native';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
+import { File, Paths } from 'expo-file-system';
 import { post } from './api';
 
 export interface PaperPayload {
@@ -62,6 +64,29 @@ export async function generatePaperPdf(
   return { uri, shared };
 }
 
+/** 生成原始 HTML 文件并分享（排错用：查看服务器返回的未渲染 HTML） */
+export async function generatePaperHtml(
+  html: string,
+  fileName: string,
+): Promise<{ uri: string; shared: boolean }> {
+  if (Platform.OS === 'web') {
+    throw new Error('HTML 文件生成仅支持 Android/iOS');
+  }
+  const safeName = fileName.replace(/[\\/:*?"<>|]/g, '_');
+  const file = new File(Paths.cache, safeName);
+  file.write(html);
+
+  let shared = false;
+  if (await Sharing.isAvailableAsync()) {
+    await Sharing.shareAsync(file.uri, {
+      mimeType: 'text/html',
+      dialogTitle: fileName,
+    });
+    shared = true;
+  }
+  return { uri: file.uri, shared };
+}
+
 /** 便捷入口：调 API → 渲染 → 生成 PDF → 分享 */
 export async function downloadPaperPdf(
   kind: PaperKind,
@@ -75,4 +100,18 @@ export async function downloadPaperPdf(
   }
   const fullHtml = buildFullHtml(html, payload.data ?? {});
   return generatePaperPdf(fullHtml, fileName);
+}
+
+/** 便捷入口：调 API → 下载原始 HTML 文件（排错用） */
+export async function downloadPaperHtml(
+  kind: PaperKind,
+  schData: Record<string, unknown>,
+  fileName: string,
+): Promise<{ uri: string; shared: boolean }> {
+  const payload = await fetchPaper(kind, schData);
+  const html = payload.html ?? '';
+  if (!html) {
+    throw new Error('服务器未返回 HTML 模板');
+  }
+  return generatePaperHtml(html, fileName);
 }

@@ -1,9 +1,9 @@
-// 主题系统：浅色 / 深色 / "cloud" (Cloud Lite 风格浅主题) / "cloud-dark"
+// 主题系统：浅色 / 深色 / Quasar / Cloud Lite / Cloud Lite 深色
 // 所有组件通过 useTheme() 获取当前色板
 import { useColorScheme } from 'react-native';
 import { useSettingsStore } from './store/settings-store';
 
-export type ThemeMode = 'light' | 'dark' | 'cloud' | 'cloud-dark' | 'system';
+export type ThemeMode = 'light' | 'dark' | 'quasar' | 'cloud' | 'cloud-dark' | 'system';
 
 export interface Palette {
   accent: string;
@@ -64,15 +64,15 @@ export const DARK_PALETTE: Palette = {
   successBg: '#1c2f22',
 };
 
-// ========== INSTLAB CLOUD Lite 风格 (浅色 — 从天蓝/白为主) ==========
-export const CLOUD_LIGHT_PALETTE: Palette = {
-  accent: '#1976D2',      // Quasar primary blue (Material Design)
+// ========== Quasar 风格 (Material Design 蓝) — 原 cloud 主题 ==========
+export const QUASAR_PALETTE: Palette = {
+  accent: '#1976D2',
   accentLight: '#42A5F5',
   bg: '#ffffff',
-  bgSubtle: '#f5f5f5',    // Quasar bg-grey-1
-  bgMuted: '#e0e0e0',     // Quasar grey-4
+  bgSubtle: '#f5f5f5',
+  bgMuted: '#e0e0e0',
   border: '#c8c8c8',
-  borderDark: '#aaaaaa',  // Quasar 卡片边框
+  borderDark: '#aaaaaa',
   text: '#1a1a1a',
   textSecondary: '#555555',
   textLight: '#8b8b8b',
@@ -84,29 +84,50 @@ export const CLOUD_LIGHT_PALETTE: Palette = {
   successBg: '#e8f5e9',
 };
 
-// ========== INSTLAB CLOUD Lite 风格 (深色) ==========
+// ========== INSTLAB CLOUD Lite 真实配色 (浅色 — #00695C 深青绿) ==========
+export const CLOUD_LIGHT_PALETTE: Palette = {
+  accent: '#00695C',      // 主色：顶部/图标/按钮/边框/标题栏
+  accentLight: '#4DB6AC', // 浅青绿
+  bg: '#ffffff',
+  bgSubtle: '#f5f5f5',
+  bgMuted: '#e0e0e0',
+  border: '#c8c8c8',
+  borderDark: '#aaaaaa',
+  text: '#1a1a1a',
+  textSecondary: '#555555',
+  textLight: '#8b8b8b',
+  danger: '#c62828',
+  success: '#2e7d32',
+  warning: '#ef6c00',
+  infoBg: '#e8f5e9',
+  dangerBg: '#ffebee',
+  successBg: '#e0f2f1',
+};
+
+// ========== INSTLAB CLOUD Lite 风格 (深色 — 深青绿) ==========
 export const CLOUD_DARK_PALETTE: Palette = {
-  accent: '#58a6ff',
-  accentLight: '#79c0ff',
-  bg: '#0d1117',
-  bgSubtle: '#161b22',
-  bgMuted: '#21262d',
-  border: '#30363d',
-  borderDark: '#484f58',
-  text: '#e6edf3',
-  textSecondary: '#8b949e',
-  textLight: '#6e7681',
-  danger: '#f85149',
-  success: '#3fb950',
-  warning: '#d29922',
-  infoBg: '#0c2d6b',
-  dangerBg: '#290a0a',
-  successBg: '#0b2e1a',
+  accent: '#4DB6AC',
+  accentLight: '#80CBC4',
+  bg: '#121212',
+  bgSubtle: '#1e1e1e',
+  bgMuted: '#2c2c2c',
+  border: '#383838',
+  borderDark: '#484848',
+  text: '#e0e0e0',
+  textSecondary: '#a0a0a0',
+  textLight: '#707070',
+  danger: '#ef5350',
+  success: '#66bb6a',
+  warning: '#ffa726',
+  infoBg: '#1b3a2e',
+  dangerBg: '#2e1b1b',
+  successBg: '#1b2e22',
 };
 
 const THEME_MAP: Record<string, Palette> = {
   light: LIGHT_PALETTE,
   dark: DARK_PALETTE,
+  quasar: QUASAR_PALETTE,
   cloud: CLOUD_LIGHT_PALETTE,
   'cloud-dark': CLOUD_DARK_PALETTE,
 };
@@ -127,6 +148,15 @@ export function useTheme(): { isDark: boolean; colors: Palette } {
   return { isDark, colors: palette };
 }
 
+// ========== 日历事件色（PC 端 Cloud Lite 规则，经用户取色确认）==========
+export const CALENDAR_COLORS = {
+  experiment: '#F6AB6D', // 标注实验/值日（用户采样色，略深）
+  homework: '#2196F3',   // 标注课程作业（蓝色）
+  theory: '#2196F3',     // 理论课
+  all: '#9C27B0',        // 都有
+  duty: '#F6AB6D',       // 值日
+} as const;
+
 export const SPACING = {
   xs: 4,
   sm: 8,
@@ -145,6 +175,7 @@ export const THEME_OPTIONS: { key: ThemeMode; label: string; desc: string }[] = 
   { key: 'system', label: '跟随系统', desc: '随系统外观自动切换' },
   { key: 'light', label: '浅色', desc: 'SlyWrite 风格浅色主题' },
   { key: 'dark', label: '深色', desc: 'SlyWrite 风格深色主题' },
-  { key: 'cloud', label: 'Cloud Lite', desc: 'INSTLAB CLOUD 风格浅色主题' },
-  { key: 'cloud-dark', label: 'Cloud Lite 深色', desc: 'INSTLAB CLOUD 风格深色主题' },
+  { key: 'quasar', label: 'Quasar', desc: 'Material Design 蓝色风格' },
+  { key: 'cloud', label: 'Cloud Lite', desc: 'INSTLAB CLOUD 风格 (#00695C)' },
+  { key: 'cloud-dark', label: 'Cloud Lite 深色', desc: 'INSTLAB CLOUD 深色风格' },
 ];

@@ -1,0 +1,26 @@
+name: Deploy INSTLAB CLOUD M Site
+
+# INSTLAB CLOUD M 官网：把 site/ 目录发布到 gh-pages 分支（仓库 Settings → Pages 选择
+# "Deploy from a branch" → gh-pages / root 即可启用，地址 https://irikana.github.io/instlab-cloud-m/）
+
+on:
+  push:
+    branches: [main]
+    paths: ['site/**']
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy to GitHub Pages (gh-pages branch)
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./site
+          publish_branch: gh-pages
+          force_orphan: true
