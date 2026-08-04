@@ -10,7 +10,7 @@ export default function ReportScreen() {
   return (
     <ScrollView style={s.container} contentContainerStyle={s.content}>
       <View style={s.placeholder}>
-        <Text style={s.icon}>📝</Text>
+        <Text style={s.icon}>报告</Text>
         <Text style={s.title}>实验报告</Text>
         <Text style={s.desc}>
           此功能即将推出{'\n\n'}

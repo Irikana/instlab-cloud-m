@@ -2,7 +2,7 @@
   "expo": {
     "name": "INSTLAB CLOUD M",
     "slug": "instlab-cloud-m",
-    "version": "0.0.2",
+    "version": "0.1.1",
     "orientation": "portrait",
     "scheme": "instlab-cloud-m",
     "userInterfaceStyle": "automatic",
@@ -33,7 +33,8 @@
             "usesCleartextTraffic": true
           }
         }
-      ]
+      ],
+      "expo-sharing"
     ],
     "experiments": {
       "tsconfigPaths": true

@@ -35,43 +35,43 @@ function confirmDialog(
 
 export default function HomeScreen() {
   const router = useRouter();
-  const { login, logout } = useAuthStore();
+  const { login, userName, userRole, logout } = useAuthStore();
   const { isDark, colors } = useTheme();
   const s = createStyles(colors);
 
   const FEATURES: FeatureItem[] = [
     {
-      title: '📄 下载作业纸',
-      desc: '下载空白回答纸与批改后作业纸（PDF）',
+      title: '下载作业纸',
+      desc: '日历选日期，下载空白/批改后作业纸 PDF',
       href: '/paper-download',
       enabled: true,
     },
     {
-      title: '📊 课程表',
+      title: '课程表',
       desc: '查看实验课程安排与教学计划',
       href: '/schedule',
       enabled: true,
     },
     {
-      title: '📝 实验报告',
+      title: '实验报告',
       desc: '提交、查看实验报告（Markdown 编辑）',
       href: '/report',
       enabled: false,
     },
     {
-      title: '📈 实验数据',
+      title: '实验数据',
       desc: '提交实验原始数据与结果',
       href: '/data-report',
       enabled: false,
     },
     {
-      title: '📁 文件管理',
+      title: '文件管理',
       desc: '管理作业附件、实验结果文件',
       href: '/files',
       enabled: false,
     },
     {
-      title: '⚙️ 设置',
+      title: '设置',
       desc: '主题切换、账户信息、关于',
       href: '/settings',
       enabled: true,
@@ -95,11 +95,19 @@ export default function HomeScreen() {
         </View>
       </View>
 
-      {/* Status bar */}
-      <View style={s.statusBar}>
-        <View style={{ flex: 1 }}>
-          <Text style={s.statusLabel}>已登录</Text>
-          <Text style={s.statusValue}>{login ?? '未知用户'}</Text>
+      {/* 用户问候 */}
+      <View style={s.greeting}>
+        <View style={s.avatar}>
+          <Text style={s.avatarText}>
+            {userName ? userName.slice(0, 1) : (login ?? '?').slice(0, 1)}
+          </Text>
+        </View>
+        <View style={{ flex: 1, marginLeft: SPACING.sm }}>
+          <Text style={s.greetingLine}>
+            你好，<Text style={s.greetingName}>{userName || login || '同学'}</Text>
+            {userRole === '100' || userRole === '200' ? '老师' : '同学'}
+          </Text>
+          <Text style={s.greetingId}>{login ?? ''}</Text>
         </View>
         <Pressable style={s.logoutBtn} onPress={handleLogout}>
           <Text style={s.logoutText}>退出</Text>
@@ -115,7 +123,7 @@ export default function HomeScreen() {
             style={[s.card, !f.enabled && s.cardDisabled]}
             onPress={() => f.enabled && f.href && router.push(f.href)}
           >
-            <Text style={s.cardIcon}>{f.icon ?? '📋'}</Text>
+            <Text style={s.cardIcon}>{f.icon ?? 'IC'}</Text>
             <Text style={[s.cardTitle, !f.enabled && s.textDisabled]}>{f.title}</Text>
             <Text style={s.cardDesc}>{f.desc}</Text>
             {!f.enabled && <Text style={s.comingBadge}>即将推出</Text>}
@@ -154,7 +162,7 @@ const createStyles = (COLORS: Palette) =>
     logoSmallText: { fontSize: 18, fontWeight: '800', color: '#fff' },
     brandName: { fontSize: 18, fontWeight: '700', color: COLORS.accent },
     brandSub: { fontSize: 11, color: COLORS.textLight, marginTop: 2 },
-    statusBar: {
+    greeting: {
       flexDirection: 'row',
       alignItems: 'center',
       backgroundColor: COLORS.bg,
@@ -163,8 +171,18 @@ const createStyles = (COLORS: Palette) =>
       padding: SPACING.md,
       marginBottom: SPACING.md,
     },
-    statusLabel: { fontSize: 12, color: COLORS.textLight },
-    statusValue: { fontSize: 15, color: COLORS.accent, fontWeight: '600', marginTop: 2 },
+    avatar: {
+      width: 42,
+      height: 42,
+      borderRadius: 21,
+      backgroundColor: COLORS.accent,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    avatarText: { fontSize: 18, fontWeight: '800', color: '#fff' },
+    greetingLine: { fontSize: 16, color: COLORS.text },
+    greetingName: { fontWeight: '700', color: COLORS.accent },
+    greetingId: { fontSize: 12, color: COLORS.textLight, marginTop: 2 },
     logoutBtn: {
       borderWidth: 1,
       borderColor: COLORS.danger,
