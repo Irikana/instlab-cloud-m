@@ -167,8 +167,12 @@ export default function PaperDownloadScreen() {
         name: userName ?? '',
         univer: univer ?? '',
       };
-      const label = kind === 'work' ? '空白作业纸' : '批改后作业纸';
-      const fileName = `${label}_${entry.title}_${entry.date}.${fmt}`;
+      const label = kind === 'work' ? '课程作业纸' : '批改作业纸';
+      const couName = entry.coursename || entry.title || '未知';
+      const stdId = login || '';
+      const stdName = userName || '';
+      const datePart = entry.date.replace(/-/g, '');
+      const fileName = `${label}_${couName}_${stdId}_${stdName}_${datePart}.${fmt}`;
       if (fmt === 'html') {
         const res = await downloadPaperHtml(kind, schData, fileName);
         Alert.alert(
@@ -210,10 +214,10 @@ export default function PaperDownloadScreen() {
     }
     setDownloadingKey('schid-' + kind + '-' + fmt);
     try {
-      const label = kind === 'work' ? '空白作业纸' : '批改后作业纸';
-      const fileName = `${label}_${id}.${fmt}`;
+      const schLabel = kind === 'work' ? '课程作业纸' : '批改作业纸';
+      const schFileName = `${schLabel}_${id}.${fmt}`;
       if (fmt === 'html') {
-        const res = await downloadPaperHtml(kind, { schid: id }, fileName);
+        const res = await downloadPaperHtml(kind, { schid: id }, schFileName);
         Alert.alert(
           'HTML 已生成',
           res.shared
@@ -221,7 +225,7 @@ export default function PaperDownloadScreen() {
             : '文件已生成：\n' + res.uri,
         );
       } else {
-        const res = await downloadPaperPdf(kind, { schid: id }, fileName);
+        const res = await downloadPaperPdf(kind, { schid: id }, schFileName);
         Alert.alert(
           'PDF 已生成',
           res.shared

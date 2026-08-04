@@ -28,53 +28,73 @@ export async function fetchPaper(kind: PaperKind, schData: Record<string, unknow
 }
 
 /**
- * 把 data 字段填进 html 模板。
- * PC 端 C# 收到后会把 html + data 拼成完整 HTML；这里做通用占位符替换：
- *   {{key}} / {key} → 值。若 html 本身已是完整 HTML（无占位符），原样返回。
- * 同时针对服务器模板的已知结构做二次填充：
- *   - 日期：服务器模板里是「下载当天」，PC 端会替换为实验安排日（sch_date）
- *   - 班级/学号/姓名：服务器模板里是空 <td>，PC 端用当前用户信息填充
+ * 把 data 字段填进 html 模板 + 嵌入 titlelogo 底版图 + 填充班级/学号/姓名/日期。
+ * PC 端 C# 收到 {html, data, titlelogo} 后：
+ *   1. 用 titlelogo（base64 PNG）作为作业纸底版背景（2937x893，含预印刷表格/定位标记）
+ *   2. 把 data 填入 html 的 infotable（班级/学号/姓名）
+ *   3. 用 sch_date 替换日期为作业布置日
+ *   4. 页面加载执行 DATAMatrix 脚本生成二维码
+ * 我们复刻同样的流程。
  */
 const WEEK_CN = ['日', '一', '二', '三', '四', '五', '六'];
 
-export function buildFullHtml(html: string, data: Record<string, unknown>): string {
+export function buildFullHtml(html: string, data: Record<string, unknown>, titlelogo?: string): string {
   let out = html;
-  for (const [k, v] of Object.entries(data ?? {})) {
-    const val = typeof v === 'string' ? v : v == null ? '' : JSON.stringify(v);
-    out = out.split('{{' + k + '}}').join(val).split('{' + k + '}').join(val);
+
+  // ---- 底版背景：把 titlelogo 作为 body 背景 ----
+  if (titlelogo && titlelogo.startsWith('iVBOR')) {
+    const bgStyle = `<style>
+      html, body {
+        margin: 0; padding: 0;
+      }
+      body {
+        background-image: url('data:image/png;base64,${titlelogo}');
+        background-size: 210mm 297mm;
+        background-position: top left;
+        background-repeat: no-repeat;
+        min-height: 297mm;
+      }
+      .content-overlay {
+        position: relative;
+        width: 210mm;
+        min-height: 297mm;
+        margin: 0 auto;
+      }
+    </style>`;
+    // 在 </head> 前注入背景样式 + 包裹 body 内容
+    out = out.replace('</head>', bgStyle + '</head>');
+    // 把 body 内容用 content-overlay 包裹
+    out = out.replace('<body>', '<body><div class="content-overlay">');
+    out = out.replace('</body>', '</div></body>');
   }
 
-  // ---- 字体兼容：模板用 Noto Serif SC，Android WebView 可能没有 → 注入 fallback 字体栈 ----
+  // ---- 字体兼容 ----
   out = out.replace(
-    /(<\/head>)/i,
+    '</head>',
     `<style>
       body, table, td, th, div, span, p {
         font-family: 'Noto Serif SC', 'Source Han Serif SC', 'Songti SC', 'SimSun', 'Noto Serif CJK SC', serif;
       }
-    </style>$1`,
+    </style></head>`,
   );
 
-  // ---- 二次填充：日期 ----
-  const schDate = data.sch_date ?? data.date ?? data.coursedatetime;
-  if (typeof schDate === 'string' && schDate) {
-    const d = parseDate(schDate);
-    if (d) {
-      const fmt = `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 (星期${WEEK_CN[d.getDay()]})`;
-      // 替换模板里的「下载当天日期」格式（如 2026年8月4日 (星期二)）
-      out = out.replace(/\d{4}年\d{1,2}月\d{1,2}日 \(星期[一二三四五六日]\)/g, fmt);
+  // ---- 日期填充：用 sch_datestring（服务器返回的已格式化日期）----
+  const dateStr = String(data.sch_datestring ?? '');
+  if (dateStr) {
+    out = out.replace(/\d{4}年\d{1,2}月\d{1,2}日 \(星期[一二三四五六日]\)[\s\S]{0,6}?\(节\)/g, dateStr);
+    out = out.replace(/\d{4}年\d{1,2}月\d{1,2}日 \(星期[一二三四五六日]\)/g, dateStr);
+  } else {
+    const schDate = data.sch_date ?? data.date ?? data.coursedatetime;
+    if (typeof schDate === 'string' && schDate) {
+      const d = parseDate(schDate);
+      if (d) {
+        const fmt = `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 (星期${WEEK_CN[d.getDay()]})`;
+        out = out.replace(/\d{4}年\d{1,2}月\d{1,2}日 \(星期[一二三四五六日]\)/g, fmt);
+      }
     }
   }
 
-  // ---- 二次填充：班级 / 学号 / 姓名（空 <td> 填入当前用户信息）----
-  const stdid = String(data.stdid ?? data.userid ?? data.studentid ?? '');
-  const name = String(data.name ?? data.studentname ?? '');
-  const klass = String(data.classname ?? data.class_name ?? '');
-  if (stdid || name || klass) {
-    // 按标签定位：学号：/ 姓名：/ 班级： 后面的空 td
-    out = fillAfterLabel(out, '学号', stdid);
-    out = fillAfterLabel(out, '姓名', name);
-    out = fillAfterLabel(out, '班级', klass);
-  }
+  // ---- 班级 / 学号 / 姓名：服务器返回的 html 已自带这些数据（通过 cookie/登录态），无需二次填充 ----
 
   return out;
 }
@@ -91,18 +111,6 @@ function parseDate(input: string): Date | null {
 }
 
 /** 找到标签（如「学号：」）后的空 <td>...</td>，填入值 */
-function fillAfterLabel(html: string, label: string, value: string): string {
-  if (!value) return html;
-  // 模板结构：<td class="text-bold" ...>学&nbsp;&nbsp;号：</td>\n<td>\n...\n</td>
-  // 先对每个标签字符做正则转义，再在字符间插入「允许 &nbsp; 或空白」的间隔
-  const escChar = (c: string) => c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const spaced = label.split('').map(escChar).join('(?:&nbsp;|\\s)*');
-  const re = new RegExp(`(${spaced}(?:&nbsp;|\\s)*[：:])<\\/td>\\s*<td[^>]*>([\\s\\S]*?)<\\/td>`);
-  return html.replace(re, (_all, labelPart: string, _space: string) =>
-    `${labelPart}</td><td>${value}</td>`,
-  );
-}
-
 /** 生成 PDF 并分享；返回 PDF 文件 uri（web 平台不可用） */
 export async function generatePaperPdf(
   html: string,
@@ -160,7 +168,7 @@ export async function downloadPaperPdf(
   if (!html) {
     throw new Error('服务器未返回 HTML 模板，无法生成 PDF');
   }
-  const fullHtml = buildFullHtml(html, payload.data ?? {});
+  const fullHtml = buildFullHtml(html, payload.data ?? {}, payload.titlelogo);
   return generatePaperPdf(fullHtml, fileName);
 }
 
