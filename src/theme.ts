@@ -69,19 +69,19 @@ export const CLOUD_LIGHT_PALETTE: Palette = {
   accent: '#1976D2',      // Quasar primary blue (Material Design)
   accentLight: '#42A5F5',
   bg: '#ffffff',
-  bgSubtle: '#f5f8fc',
-  bgMuted: '#eef2f7',
-  border: '#d0d7de',
-  borderDark: '#b0b8c1',
-  text: '#1a2332',
-  textSecondary: '#57606a',
-  textLight: '#8b949e',
-  danger: '#d73a49',
-  success: '#2da44e',
-  warning: '#d4920b',
-  infoBg: '#ddf4ff',
-  dangerBg: '#ffebe9',
-  successBg: '#dafbe1',
+  bgSubtle: '#f5f5f5',    // Quasar bg-grey-1
+  bgMuted: '#e0e0e0',     // Quasar grey-4
+  border: '#c8c8c8',
+  borderDark: '#aaaaaa',  // Quasar 卡片边框
+  text: '#1a1a1a',
+  textSecondary: '#555555',
+  textLight: '#8b8b8b',
+  danger: '#c62828',
+  success: '#2e7d32',
+  warning: '#ef6c00',
+  infoBg: '#e3f2fd',
+  dangerBg: '#ffebee',
+  successBg: '#e8f5e9',
 };
 
 // ========== INSTLAB CLOUD Lite 风格 (深色) ==========

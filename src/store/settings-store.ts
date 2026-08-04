@@ -12,7 +12,7 @@ interface SettingsState {
 }
 
 export const useSettingsStore = create<SettingsState>((set) => ({
-  themeMode: 'system',
+  themeMode: 'cloud',
   init: async () => {
     try {
       const v = await AsyncStorage.getItem(THEME_KEY);

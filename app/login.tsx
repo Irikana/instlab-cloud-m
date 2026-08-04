@@ -118,7 +118,7 @@ export default function LoginScreen() {
           onChangeText={(v) => { setCaptcha(v); if (error) clearError(); }}
           placeholder="输入右侧验证码"
           placeholderTextColor={colors.textLight}
-          autoCapitalize="characters"
+          autoCapitalize="none"
           autoCorrect={false}
         />
         <Pressable style={s.captchaBox} onPress={handleRefreshCaptcha}>
@@ -184,11 +184,13 @@ const createStyles = (COLORS: Palette) =>
     input: {
       borderWidth: 1,
       borderColor: COLORS.border,
-      padding: SPACING.sm + 2,
+      paddingVertical: 12,
+      paddingHorizontal: SPACING.sm + 2,
       fontSize: 15,
       color: COLORS.text,
       backgroundColor: COLORS.bg,
       marginBottom: SPACING.md,
+      minHeight: 46,
     },
     inputRow: { flexDirection: 'row', alignItems: 'stretch', marginBottom: SPACING.md },
     eyeBtn: {
@@ -199,6 +201,7 @@ const createStyles = (COLORS: Palette) =>
       alignItems: 'center',
       justifyContent: 'center',
       backgroundColor: COLORS.bgMuted,
+      minHeight: 46,
     },
     eyeText: { fontSize: 13, color: COLORS.textSecondary },
     captchaRow: { flexDirection: 'row', alignItems: 'stretch', marginBottom: SPACING.md },
@@ -210,7 +213,8 @@ const createStyles = (COLORS: Palette) =>
       alignItems: 'center',
       justifyContent: 'center',
       paddingHorizontal: SPACING.sm,
-      minWidth: 140,
+      minHeight: 46,
+      minWidth: 150,
     },
     captchaLoading: { fontSize: 12, color: COLORS.textLight },
     errorBox: {

@@ -1,7 +1,7 @@
 // 学期 + 日程 API — 获取学期列表与实验安排（PC 端 SchedulePage/MainPage 逻辑的手机端实现）
-// 主 API：GET /api/terms?t=a  → 学期列表
-//        GET /api/schedule?termid=X&collegeid=0&type=schedule → 实验/理论课日程（含 sch_date）
-// 备用：  GET /api/sschedule?type=0&t=X&s={学号} → 学生实验安排（含 coursedatetime）
+// 主 API：GET /api/term  → 学期列表（注意是单数 term，不是 terms！）
+//        GET /api/schedule?termid=X&collegeid=0&type=schedule → 实验日程（返回数组，含 sch_date）
+//        GET /api/scheduleth?termid=X&collegeid=0&type=schedule → 理论课日程
 import { get } from './api';
 
 export interface Term {
@@ -14,15 +14,28 @@ export interface ScheduleEntry {
   schid: string;
   planid?: string;
   planexpid?: string;
+  expid?: string;
   /** 规范化日期 YYYY-MM-DD */
   date: string;
   dateRaw?: string;
   title: string;
   /** 实验序号/编号 */
   expno?: string;
+  /** 课程名称 */
+  coursename?: string;
+  /** 课程编号 */
+  coursenumber?: string;
   time?: string;
   place?: string;
   teacher?: string;
+  /** 状态：签到/交数据/交报告（PC 端 issigned/isdata/isreport） */
+  issigned?: boolean;
+  isdata?: boolean;
+  isreport?: boolean;
+  /** 值日（PC 端 dutystatus==1 显示橙色「值日」badge） */
+  dutystatus?: boolean;
+  /** 成绩（教师评分） */
+  mark?: string | number;
   /** 类型标签：experiment | theory | duty | 未知 */
   kind: string;
   raw: Record<string, unknown>;
@@ -78,54 +91,65 @@ function extractEntry(raw: Record<string, unknown>): ScheduleEntry | null {
     schid,
     planid: raw.planid ? String(raw.planid) : undefined,
     planexpid: raw.planexpid ? String(raw.planexpid) : undefined,
+    expid: raw.expid ? String(raw.expid) : undefined,
     date,
     dateRaw: String(raw.sch_date ?? raw.coursedatetime ?? ''),
     title: String(raw.expname ?? raw.sch_title ?? raw.title ?? raw.coursename ?? raw.expno ?? '实验安排'),
     expno: raw.expno ? String(raw.expno) : undefined,
-    time: String(raw.coursehour ?? raw.time ?? raw.course_time ?? ''),
+    coursename: raw.coursename ? String(raw.coursename) : undefined,
+    coursenumber: raw.coursenumber ? String(raw.coursenumber) : undefined,
+    time: String(raw.coursehour ?? raw.time ?? raw.course_time ?? raw.sch_time ?? ''),
     place: String(raw.labroom ?? raw.labname ?? raw.room ?? raw.place ?? ''),
     teacher: String(raw.teachername ?? raw.teacher ?? raw.teacherName ?? ''),
+    issigned: raw.time_signin != null || raw.issigned === true || raw.signed === true || raw.signined === true,
+    isdata: raw.time_datapaper != null || raw.isdata === true,
+    isreport: raw.time_report != null || raw.isreport === true,
+    dutystatus: raw.dutystatus === 1 || raw.dutystatus === true || raw.dutystatus === '1',
+    mark: raw.mark !== undefined ? (raw.mark as string | number) : undefined,
     kind,
     raw,
   };
 }
 
-/** 获取学期列表 */
+/** 获取学期列表：GET /api/term（PC 端 SchedulePage 用 $api.get('/api/term')，返回数组） */
 export async function fetchTermList(): Promise<Term[]> {
-  const r = await get<{ list_data?: Term[] }>('/api/terms?t=a');
-  return r.list_data ?? [];
+  const r = await get<Term[] | { list_data?: Term[] }>('/api/term');
+  if (Array.isArray(r)) return r as Term[];
+  return (r as { list_data?: Term[] }).list_data ?? [];
 }
 
-/** 获取日程条目：主 API /api/schedule，失败回退 /api/sschedule */
+/** 获取日程条目：/api/schedule + /api/scheduleth（PC 端返回数组 e.data），失败返回空 */
 export async function fetchScheduleEntries(termId: string, userId: string): Promise<ScheduleEntry[]> {
-  // 主 API（带 sch_date，最贴合日历）
+  const entries: ScheduleEntry[] = [];
+  const params = `termid=${encodeURIComponent(termId)}&collegeid=0&type=schedule`;
+
+  // 实验日程 /api/schedule
   try {
-    const r = await get<{ list_data?: unknown[] }>(
-      `/api/schedule?termid=${encodeURIComponent(termId)}&collegeid=0&type=schedule`,
+    const r = await get<unknown[] | { list_data?: unknown[] }>(
+      `/api/schedule?${params}`,
     );
-    const list = r.list_data ?? [];
-    if (list.length > 0) {
-      const entries = list
-        .map((it) => extractEntry(it as Record<string, unknown>))
-        .filter((e): e is ScheduleEntry => e !== null);
-      if (entries.length > 0) return entries;
-    }
+    const list = Array.isArray(r) ? (r as unknown[]) : (r as { list_data?: unknown[] }).list_data ?? [];
+    entries.push(...list
+      .map((it) => extractEntry(it as Record<string, unknown>))
+      .filter((e): e is ScheduleEntry => e !== null));
   } catch {
-    // 继续尝试备用 API
+    // 忽略，继续理论课
   }
 
-  // 备用 API（学生实验安排）
+  // 理论课日程 /api/scheduleth
   try {
-    const r = await get<{ list_data?: unknown[] }>(
-      `/api/sschedule?type=0&t=${encodeURIComponent(termId)}&s=${encodeURIComponent(userId)}`,
+    const r = await get<unknown[] | { list_data?: unknown[] }>(
+      `/api/scheduleth?${params}`,
     );
-    const list = r.list_data ?? [];
-    return list
+    const list = Array.isArray(r) ? (r as unknown[]) : (r as { list_data?: unknown[] }).list_data ?? [];
+    entries.push(...list
       .map((it) => extractEntry(it as Record<string, unknown>))
-      .filter((e): e is ScheduleEntry => e !== null);
+      .filter((e): e is ScheduleEntry => e !== null));
   } catch {
-    return [];
+    // 忽略
   }
+
+  return entries;
 }
 
 /** 类型 → 中文标签 */

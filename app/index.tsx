@@ -35,7 +35,7 @@ function confirmDialog(
 
 export default function HomeScreen() {
   const router = useRouter();
-  const { login, userName, userRole, logout } = useAuthStore();
+  const { login, userName, isTeacher, logout } = useAuthStore();
   const { isDark, colors } = useTheme();
   const s = createStyles(colors);
 
@@ -97,15 +97,15 @@ export default function HomeScreen() {
 
       {/* 用户问候 */}
       <View style={s.greeting}>
-        <View style={s.avatar}>
-          <Text style={s.avatarText}>
-            {userName ? userName.slice(0, 1) : (login ?? '?').slice(0, 1)}
-          </Text>
-        </View>
+        {userName && userName !== login && (
+          <View style={s.avatar}>
+            <Text style={s.avatarText}>{userName.slice(0, 1)}</Text>
+          </View>
+        )}
         <View style={{ flex: 1, marginLeft: SPACING.sm }}>
           <Text style={s.greetingLine}>
             你好，<Text style={s.greetingName}>{userName || login || '同学'}</Text>
-            {userRole === '100' || userRole === '200' ? '老师' : '同学'}
+            {isTeacher ? '老师' : '同学'}
           </Text>
           <Text style={s.greetingId}>{login ?? ''}</Text>
         </View>

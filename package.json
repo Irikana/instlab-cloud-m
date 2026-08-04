@@ -1,6 +1,6 @@
 {
   "name": "instlab-cloud-m",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "main": "expo-router/entry",
   "dependencies": {
     "@expo/metro-runtime": "~57.0.8",

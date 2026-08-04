@@ -93,8 +93,18 @@ export default function PaperDownloadScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /** 有安排的日期集合 */
-  const markedDates = useMemo(() => new Set(entriesByDate.keys()), [entriesByDate]);
+  /** 有安排的日期 → 事件颜色类型（PC 端规则：实验=orange、理论=blue、都有=purple） */
+  const dateColors = useMemo(() => {
+    const map = new Map<string, 'orange' | 'blue' | 'purple'>();
+    entriesByDate.forEach((entries, date) => {
+      const hasExp = entries.some((e) => e.kind === 'experiment');
+      const hasTheory = entries.some((e) => e.kind === 'theory' || e.kind === 'duty');
+      if (hasExp && hasTheory) map.set(date, 'purple');
+      else if (hasExp) map.set(date, 'orange');
+      else if (hasTheory) map.set(date, 'blue');
+    });
+    return map;
+  }, [entriesByDate]);
 
   /** 当前查看月的日历格子（null 表示空白） */
   const cells = useMemo(() => {
@@ -258,13 +268,21 @@ export default function PaperDownloadScreen() {
                 const dk = dateKeyOf(day);
                 const isSelected = dk === selectedDate;
                 const isToday = dk === todayStr();
-                const hasEntry = markedDates.has(dk);
+                const evColor = dateColors.get(dk);
                 return (
                   <Pressable key={dk} style={s.dayCell} onPress={() => selectDate(day)}>
-                    <View style={[s.dayCircle, isSelected && s.dayCircleSelected, isToday && !isSelected && s.dayCircleToday]}>
-                      <Text style={[s.dayNum, isSelected && s.dayNumSelected]}>{day}</Text>
+                    <View
+                      style={[
+                        s.dayCircle,
+                        evColor === 'orange' && s.dayCircleOrange,
+                        evColor === 'blue' && s.dayCircleBlue,
+                        evColor === 'purple' && s.dayCirclePurple,
+                        isToday && !isSelected && s.dayCircleToday,
+                        isSelected && s.dayCircleSelected,
+                      ]}
+                    >
+                      <Text style={[s.dayNum, (evColor || isSelected) && s.dayNumOnColor]}>{day}</Text>
                     </View>
-                    <View style={[s.dot, hasEntry && s.dotMarked, isSelected && s.dotOnSelected]} />
                   </Pressable>
                 );
               })}
@@ -305,12 +323,28 @@ export default function PaperDownloadScreen() {
                     {entry.expno ? <Text style={s.expno}>{entry.expno}</Text> : null}
                   </View>
                   <Text style={s.entryTitle}>{entry.title}</Text>
+                  {entry.coursename && (
+                    <Text style={s.entryMeta}>
+                      {[entry.coursenumber, entry.coursename].filter(Boolean).join(' ')}
+                    </Text>
+                  )}
                   {(entry.time || entry.place) && (
                     <Text style={s.entryMeta}>
                       {[entry.time, entry.place].filter(Boolean).join(' · ')}
                     </Text>
                   )}
                   {entry.teacher ? <Text style={s.entryMeta}>教师：{entry.teacher}</Text> : null}
+                  {(entry.issigned || entry.isdata || entry.isreport || entry.dutystatus || entry.mark !== undefined) && (
+                    <View style={s.statusRow}>
+                      {entry.dutystatus && <Text style={[s.statusBadge, s.statusDuty]}>值日</Text>}
+                      {entry.issigned && <Text style={[s.statusBadge, s.statusOk]}>已签到</Text>}
+                      {entry.isdata && <Text style={[s.statusBadge, s.statusOk]}>已交数据</Text>}
+                      {entry.isreport && <Text style={[s.statusBadge, s.statusOk]}>已交报告</Text>}
+                      {entry.mark !== undefined && entry.mark !== null && entry.mark !== '' && (
+                        <Text style={[s.statusBadge, s.statusMark]}>成绩：{entry.mark}</Text>
+                      )}
+                    </View>
+                  )}
 
                   <View style={s.entryActions}>
                     <Pressable
@@ -467,13 +501,14 @@ const createStyles = (COLORS: Palette) =>
       alignItems: 'center',
       justifyContent: 'center',
     },
-    dayCircleSelected: { backgroundColor: COLORS.accent },
+    // PC 端日历事件色：实验=orange、理论=blue、都有=purple
+    dayCircleOrange: { backgroundColor: '#ff9800' },
+    dayCircleBlue: { backgroundColor: '#2196f3' },
+    dayCirclePurple: { backgroundColor: '#9c27b0' },
+    dayCircleSelected: { borderWidth: 2, borderColor: COLORS.accent, backgroundColor: COLORS.accent },
     dayCircleToday: { borderWidth: 1.5, borderColor: COLORS.accent },
     dayNum: { fontSize: 14, color: COLORS.text },
-    dayNumSelected: { color: '#fff', fontWeight: '700' },
-    dot: { width: 5, height: 5, borderRadius: 3, marginTop: 1 },
-    dotMarked: { backgroundColor: COLORS.accentLight },
-    dotOnSelected: { backgroundColor: '#fff' },
+    dayNumOnColor: { color: '#fff', fontWeight: '700' },
 
     // 列表
     listHeader: { marginBottom: SPACING.sm },
@@ -501,6 +536,18 @@ const createStyles = (COLORS: Palette) =>
     expno: { marginLeft: 'auto', fontSize: 12, color: COLORS.textLight },
     entryTitle: { fontSize: 15, fontWeight: '600', color: COLORS.text, marginBottom: 4 },
     entryMeta: { fontSize: 12, color: COLORS.textSecondary, lineHeight: 18 },
+    statusRow: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 6, gap: 6 },
+    statusBadge: {
+      fontSize: 11,
+      fontWeight: '600',
+      paddingHorizontal: 8,
+      paddingVertical: 2,
+      borderRadius: 3,
+      overflow: 'hidden',
+    },
+    statusOk: { color: COLORS.success, backgroundColor: COLORS.successBg, borderWidth: 1, borderColor: COLORS.success },
+    statusDuty: { color: '#b45309', backgroundColor: '#fff7ed', borderWidth: 1, borderColor: '#f97316' },
+    statusMark: { color: COLORS.accent, backgroundColor: COLORS.infoBg, borderWidth: 1, borderColor: COLORS.accentLight },
     entryActions: { flexDirection: 'row', marginTop: SPACING.sm },
     dlBtn: {
       flex: 1,

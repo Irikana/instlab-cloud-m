@@ -2,7 +2,7 @@
   "expo": {
     "name": "INSTLAB CLOUD M",
     "slug": "instlab-cloud-m",
-    "version": "0.0.3",
+    "version": "0.0.4",
     "orientation": "portrait",
     "scheme": "instlab-cloud-m",
     "userInterfaceStyle": "automatic",

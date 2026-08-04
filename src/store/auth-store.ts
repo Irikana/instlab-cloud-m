@@ -15,6 +15,7 @@ interface AuthState {
   login: string | null;           // 学号/工号
   userName: string | null;        // 姓名
   userRole: string | null;        // 角色
+  isTeacher: boolean;            // 是否教师/管理员（PC 端 IsTeacher/IsSchoolAdmin/IsUniversityAdmin）
   univer: string | null;          // 学校代码
   loading: boolean;
   error: string | null;
@@ -35,6 +36,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   login: null,
   userName: null,
   userRole: null,
+  isTeacher: false,
   univer: null,
   loading: false,
   error: null,
@@ -103,14 +105,21 @@ export const useAuthStore = create<AuthState>((set) => ({
       // 登录成功后服务器会更新 session cookie
       saveCookiesFromResponse(loginResp.headers);
 
+      // 真实姓名字段是 username（PC 端 CloudLayout 用 e.userinfo.username）
+      // 角色字段：role（数字）+ IsStudent/IsTeacher/IsSchoolAdmin/IsUniversityAdmin 等布尔
+      const realName = userinfo.username || userinfo.name || userinfo.realname || '';
+      const realRole = userinfo.role !== undefined ? String(userinfo.role) : '';
+      const isTeacher = !!(userinfo.IsTeacher || userinfo.IsSchoolAdmin || userinfo.IsUniversityAdmin || userinfo.IsCourseAdmin);
+
       // 保存 token（用 userinfo 或 cookie 中的 token 字段）
       const token = cookieHeader() || String(userinfo.id || '');
       await setToken(token);
       set({
         isAuthenticated: true,
         login: studentId,
-        userName: userinfo.name || studentId,
-        userRole: userinfo.role ? String(userinfo.role) : '',
+        userName: realName || studentId,
+        userRole: realRole,
+        isTeacher,
         univer,
         loading: false,
         error: null,
@@ -129,6 +138,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       login: null,
       userName: null,
       userRole: null,
+      isTeacher: false,
       univer: null,
       error: null,
       captchaSvg: null,
