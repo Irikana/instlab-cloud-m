@@ -24,7 +24,7 @@ import {
   WEEK_LABELS,
   type ScheduleEntry,
 } from '../src/lib/schedule';
-import { downloadPaperPdf, downloadPaperHtml, type PaperKind } from '../src/lib/paper';
+import { downloadPaperPdf, downloadPaperHtml, downloadPaperJson, type PaperKind } from '../src/lib/paper';
 
 type Mode = 'calendar' | 'schid';
 
@@ -146,7 +146,7 @@ export default function PaperDownloadScreen() {
   const dateKeyOf = (day: number) => `${viewYear}-${pad2(viewMonth + 1)}-${pad2(day)}`;
 
   /** 下载作业纸（从日程条目） */
-  const handleEntryDownload = async (entry: ScheduleEntry, kind: PaperKind, fmt: 'pdf' | 'html' = 'pdf') => {
+  const handleEntryDownload = async (entry: ScheduleEntry, kind: PaperKind, fmt: 'pdf' | 'html' | 'json' = 'pdf') => {
     const key = `${entry.schid}-${kind}-${fmt}`;
     setDownloadingKey(key);
     try {
@@ -175,6 +175,14 @@ export default function PaperDownloadScreen() {
           'HTML 已生成',
           res.shared
             ? '请在系统分享面板中选择保存位置。\n\n' + res.uri
+            : '文件已生成：\n' + res.uri,
+        );
+      } else if (fmt === 'json') {
+        const res = await downloadPaperJson(kind, schData, fileName);
+        Alert.alert(
+          'JSON 已生成（完整响应）',
+          res.shared
+            ? '请在系统分享面板中选择保存位置，用于分析服务器返回的完整 data。\n\n' + res.uri
             : '文件已生成：\n' + res.uri,
         );
       } else {
@@ -412,7 +420,18 @@ export default function PaperDownloadScreen() {
                       {downloadingKey === `${entry.schid}-work-html` ? (
                         <ActivityIndicator size="small" color={colors.textSecondary} />
                       ) : (
-                        <Text style={s.dlBtnOutlineText}>原始HTML</Text>
+                        <Text style={s.dlBtnOutlineText}>HTML</Text>
+                      )}
+                    </Pressable>
+                    <Pressable
+                      style={[s.dlBtnOutline2, (busy || downloadingKey === `${entry.schid}-work-json`) && s.btnDisabled]}
+                      disabled={busy}
+                      onPress={() => handleEntryDownload(entry, 'work', 'json')}
+                    >
+                      {downloadingKey === `${entry.schid}-work-json` ? (
+                        <ActivityIndicator size="small" color={colors.textSecondary} />
+                      ) : (
+                        <Text style={s.dlBtnOutlineText}>JSON</Text>
                       )}
                     </Pressable>
                   </View>
@@ -646,6 +665,14 @@ const createStyles = (COLORS: Palette) =>
       marginLeft: SPACING.sm,
     },
     dlBtnOutlineText: { color: COLORS.textSecondary, fontSize: 12, fontWeight: '600' },
+    dlBtnOutline2: {
+      flex: 1,
+      borderWidth: 1,
+      borderColor: COLORS.borderDark,
+      paddingVertical: SPACING.sm - 1,
+      alignItems: 'center',
+      marginLeft: SPACING.sm,
+    },
     btnDisabled: { opacity: 0.5 },
 
     // 空态 / 错误

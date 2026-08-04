@@ -177,3 +177,37 @@ export async function downloadPaperHtml(
   }
   return generatePaperHtml(html, fileName);
 }
+
+/** 生成完整响应 JSON 文件并分享（调试用：查看服务器返回的完整 data 字段，含题目数据） */
+export async function generatePaperJson(
+  payload: PaperPayload,
+  fileName: string,
+): Promise<{ uri: string; shared: boolean }> {
+  if (Platform.OS === 'web') {
+    throw new Error('JSON 文件生成仅支持 Android/iOS');
+  }
+  const json = JSON.stringify(payload, null, 2);
+  const safeName = fileName.replace(/[\\/:*?"<>|]/g, '_');
+  const file = new File(Paths.cache, safeName);
+  file.write(json);
+
+  let shared = false;
+  if (await Sharing.isAvailableAsync()) {
+    await Sharing.shareAsync(file.uri, {
+      mimeType: 'application/json',
+      dialogTitle: fileName,
+    });
+    shared = true;
+  }
+  return { uri: file.uri, shared };
+}
+
+/** 便捷入口：调 API → 下载完整响应 JSON（调试用） */
+export async function downloadPaperJson(
+  kind: PaperKind,
+  schData: Record<string, unknown>,
+  fileName: string,
+): Promise<{ uri: string; shared: boolean }> {
+  const payload = await fetchPaper(kind, schData);
+  return generatePaperJson(payload, fileName);
+}

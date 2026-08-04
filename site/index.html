@@ -107,26 +107,21 @@
     }
     // 版本动态化：从 GitHub Releases 读取最新 tag（按版本号取最大），失败时保留静态回退值
     (function () {
-      var fallback = 'v0.0.4';
+      var fallback = 'v0.0.6';
       var el = document.getElementById('current-version');
       function apply(v) { if (el && v) el.textContent = v; }
-      function parse(v) { return (v.replace(/^v/, '')).split('.').map(function (n) { return parseInt(n, 10) || 0; }); }
       fetch('https://api.github.com/repos/Irikana/instlab-cloud-m/releases?per_page=10')
         .then(function (r) { return r.ok ? r.json() : null; })
         .then(function (list) {
           if (!list || !list.length) { apply(fallback); return; }
+          // 按发布时间取最新（published_at 最大），而非版本号大小（v0.1.0 是纪念版）
           var best = null;
           for (var i = 0; i < list.length; i++) {
             var rel = list[i];
             if (rel.draft) continue;
-            if (!best) { best = rel.tag_name; continue; }
-            var a = parse(rel.tag_name), b = parse(best);
-            for (var k = 0; k < 3; k++) {
-              var d = (a[k] || 0) - (b[k] || 0);
-              if (d !== 0) { if (d > 0) best = rel.tag_name; break; }
-            }
+            if (!best || new Date(rel.published_at) > new Date(best.published_at)) best = rel;
           }
-          apply(best || fallback);
+          apply(best ? best.tag_name : fallback);
         })
         .catch(function () { apply(fallback); });
     })();

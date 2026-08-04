@@ -65,8 +65,10 @@ async function fetchRepoRelease(owner: string, repo: string): Promise<ReleaseInf
     const list: RawRelease[] = await listRes.json();
     const releases = (list ?? []).filter((r) => !r.draft).map(mapRelease);
     if (releases.length === 0) return null;
+    // 按发布时间取最新（published_at 最大）——而不是按版本号大小。
+    // 因为 v0.1.0 是纪念版（版本号最大但发布时间早），用户要的是「最新发布」。
     return releases.reduce((best, r) =>
-      compareVersions(r.tagName, best.tagName) > 0 ? r : best,
+      new Date(r.publishedAt) > new Date(best.publishedAt) ? r : best,
     );
   }
   if (listRes.status === 404) return null;
