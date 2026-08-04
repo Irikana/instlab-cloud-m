@@ -50,7 +50,7 @@ export default function HomeScreen() {
       title: '课程表',
       desc: '查看实验课程安排与教学计划',
       href: '/schedule',
-      enabled: true,
+      enabled: false,
     },
     {
       title: '实验报告',

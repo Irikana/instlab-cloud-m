@@ -1,9 +1,9 @@
 // 更新检查：从 GitHub Releases 获取最新版本与 APK 下载链接
-// 公开仓库无需 Token，但已登录时带上 Token 可显著提升速率限制（未认证 60 次/时，易触发 403）
+// 注意：不能用 INSTLAB 的登录 token 当作 GitHub Bearer（会返回 401）——
+// 本应用没有 GitHub PAT，因此采用纯匿名请求（公开仓库 60 次/时，检查更新是低频操作足够）。
 // 取版本方式：拉取 releases 列表，按版本号比较取最大（而非依赖 /releases/latest 的返回顺序，
 // 避免历史归档 release 因发布时间较晚而抢占"最新"）
 import { APP_REPO_CONFIG, GITHUB_API } from './config';
-import { getToken } from './auth';
 
 export interface ReleaseAsset {
   name: string;
@@ -51,10 +51,9 @@ function mapRelease(data: RawRelease): ReleaseInfo {
 
 /** 获取指定仓库的最新 release；仓库无 release 时返回 null */
 async function fetchRepoRelease(owner: string, repo: string): Promise<ReleaseInfo | null> {
-  const token = await getToken();
   const headers: Record<string, string> = {
     Accept: 'application/vnd.github+json',
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    'User-Agent': 'instlab-cloud-m',
   };
 
   // 方式一：列表接口 → 过滤 draft → 按版本号取最大（最稳妥）

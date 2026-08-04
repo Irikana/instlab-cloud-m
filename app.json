@@ -2,7 +2,7 @@
   "expo": {
     "name": "INSTLAB CLOUD M",
     "slug": "instlab-cloud-m",
-    "version": "0.0.5",
+    "version": "0.0.6",
     "orientation": "portrait",
     "scheme": "instlab-cloud-m",
     "userInterfaceStyle": "automatic",
@@ -16,7 +16,7 @@
       "package": "io.github.instlab.cloudm",
       "icon": "./src/assets/icon.png",
       "adaptiveIcon": {
-        "backgroundColor": "#1976D2",
+        "backgroundColor": "#00695C",
         "foregroundImage": "./src/assets/adaptive-icon.png"
       }
     },

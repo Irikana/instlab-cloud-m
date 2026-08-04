@@ -33,3 +33,5 @@ yarn-error.*
 # Native build directories
 android/
 ios/
+# ÁÙÊ±ÅÅ´íÎÄ¼ş
+pc-analysis/

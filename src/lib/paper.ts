@@ -31,14 +31,76 @@ export async function fetchPaper(kind: PaperKind, schData: Record<string, unknow
  * 把 data 字段填进 html 模板。
  * PC 端 C# 收到后会把 html + data 拼成完整 HTML；这里做通用占位符替换：
  *   {{key}} / {key} → 值。若 html 本身已是完整 HTML（无占位符），原样返回。
+ * 同时针对服务器模板的已知结构做二次填充：
+ *   - 日期：服务器模板里是「下载当天」，PC 端会替换为实验安排日（sch_date）
+ *   - 班级/学号/姓名：服务器模板里是空 <td>，PC 端用当前用户信息填充
  */
+const WEEK_CN = ['日', '一', '二', '三', '四', '五', '六'];
+
 export function buildFullHtml(html: string, data: Record<string, unknown>): string {
   let out = html;
   for (const [k, v] of Object.entries(data ?? {})) {
     const val = typeof v === 'string' ? v : v == null ? '' : JSON.stringify(v);
     out = out.split('{{' + k + '}}').join(val).split('{' + k + '}').join(val);
   }
+
+  // ---- 字体兼容：模板用 Noto Serif SC，Android WebView 可能没有 → 注入 fallback 字体栈 ----
+  out = out.replace(
+    /(<\/head>)/i,
+    `<style>
+      body, table, td, th, div, span, p {
+        font-family: 'Noto Serif SC', 'Source Han Serif SC', 'Songti SC', 'SimSun', 'Noto Serif CJK SC', serif;
+      }
+    </style>$1`,
+  );
+
+  // ---- 二次填充：日期 ----
+  const schDate = data.sch_date ?? data.date ?? data.coursedatetime;
+  if (typeof schDate === 'string' && schDate) {
+    const d = parseDate(schDate);
+    if (d) {
+      const fmt = `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 (星期${WEEK_CN[d.getDay()]})`;
+      // 替换模板里的「下载当天日期」格式（如 2026年8月4日 (星期二)）
+      out = out.replace(/\d{4}年\d{1,2}月\d{1,2}日 \(星期[一二三四五六日]\)/g, fmt);
+    }
+  }
+
+  // ---- 二次填充：班级 / 学号 / 姓名（空 <td> 填入当前用户信息）----
+  const stdid = String(data.stdid ?? data.userid ?? data.studentid ?? '');
+  const name = String(data.name ?? data.studentname ?? '');
+  const klass = String(data.classname ?? data.class_name ?? '');
+  if (stdid || name || klass) {
+    // 按标签定位：学号：/ 姓名：/ 班级： 后面的空 td
+    out = fillAfterLabel(out, '学号', stdid);
+    out = fillAfterLabel(out, '姓名', name);
+    out = fillAfterLabel(out, '班级', klass);
+  }
+
   return out;
+}
+
+/** 解析常见日期格式为 Date（YYYY/MM/DD、YYYY-MM-DD、时间戳） */
+function parseDate(input: string): Date | null {
+  const m = input.match(/(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})/);
+  if (m) {
+    const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    return isNaN(d.getTime()) ? null : d;
+  }
+  const d = new Date(input);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+/** 找到标签（如「学号：」）后的空 <td>...</td>，填入值 */
+function fillAfterLabel(html: string, label: string, value: string): string {
+  if (!value) return html;
+  // 模板结构：<td class="text-bold" ...>学&nbsp;&nbsp;号：</td>\n<td>\n...\n</td>
+  // 先对每个标签字符做正则转义，再在字符间插入「允许 &nbsp; 或空白」的间隔
+  const escChar = (c: string) => c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const spaced = label.split('').map(escChar).join('(?:&nbsp;|\\s)*');
+  const re = new RegExp(`(${spaced}(?:&nbsp;|\\s)*[：:])<\\/td>\\s*<td[^>]*>([\\s\\S]*?)<\\/td>`);
+  return html.replace(re, (_all, labelPart: string, _space: string) =>
+    `${labelPart}</td><td>${value}</td>`,
+  );
 }
 
 /** 生成 PDF 并分享；返回 PDF 文件 uri（web 平台不可用） */
