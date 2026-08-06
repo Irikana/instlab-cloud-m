@@ -13,6 +13,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { useRouter } from 'expo-router';
 import { useAuthStore } from '../src/store/auth-store';
 import { SPACING, useTheme, type Palette, CALENDAR_COLORS } from '../src/theme';
 import {
@@ -33,6 +34,7 @@ const pad2 = (n: number) => String(n).padStart(2, '0');
 export default function PaperDownloadScreen() {
   const { colors } = useTheme();
   const s = createStyles(colors);
+  const router = useRouter();
   const login = useAuthStore((st) => st.login);
   const userName = useAuthStore((st) => st.userName);
   const userRole = useAuthStore((st) => st.userRole);
@@ -395,26 +397,40 @@ export default function PaperDownloadScreen() {
 
                   <View style={s.entryActions}>
                     <Pressable
-                      style={[s.dlBtn, (busy || downloadingKey === `${entry.schid}-work-pdf`) && s.btnDisabled]}
+                      style={[s.dlBtn, busy && s.btnDisabled]}
                       disabled={busy}
-                      onPress={() => handleEntryDownload(entry, 'work', 'pdf')}
+                      onPress={() => {
+                        const title = entry.coursename || entry.title || '作业';
+                        router.push({
+                          pathname: '/paper-preview',
+                          params: {
+                            schid: entry.schid,
+                            kind: 'work',
+                            title,
+                            date: entry.date,
+                          },
+                        });
+                      }}
                     >
-                      {downloadingKey === `${entry.schid}-work-pdf` ? (
-                        <ActivityIndicator size="small" color="#fff" />
-                      ) : (
-                        <Text style={s.dlBtnText}>空白PDF</Text>
-                      )}
+                      <Text style={s.dlBtnText}>预览</Text>
                     </Pressable>
                     <Pressable
-                      style={[s.dlBtnSecondary, (busy || downloadingKey === `${entry.schid}-workcorr-pdf`) && s.btnDisabled]}
+                      style={[s.dlBtnSecondary, busy && s.btnDisabled]}
                       disabled={busy}
-                      onPress={() => handleEntryDownload(entry, 'workcorr', 'pdf')}
+                      onPress={() => {
+                        const title = entry.coursename || entry.title || '批改';
+                        router.push({
+                          pathname: '/paper-preview',
+                          params: {
+                            schid: entry.schid,
+                            kind: 'workcorr',
+                            title,
+                            date: entry.date,
+                          },
+                        });
+                      }}
                     >
-                      {downloadingKey === `${entry.schid}-workcorr-pdf` ? (
-                        <ActivityIndicator size="small" color={colors.accent} />
-                      ) : (
-                        <Text style={s.dlBtnSecondaryText}>批改PDF</Text>
-                      )}
+                      <Text style={s.dlBtnSecondaryText}>批改预览</Text>
                     </Pressable>
                     <Pressable
                       style={[s.dlBtnOutline, (busy || downloadingKey === `${entry.schid}-work-html`) && s.btnDisabled]}
@@ -470,24 +486,30 @@ export default function PaperDownloadScreen() {
             <Pressable
               style={[s.actionBtn, { flex: 1 }, downloadingKey !== null && s.btnDisabled]}
               disabled={downloadingKey !== null}
-              onPress={() => handleSchidDownload('work', 'pdf')}
+              onPress={() => {
+                const id = scheduleId.trim();
+                if (!id) return;
+                router.push({
+                  pathname: '/paper-preview',
+                  params: { schid: id, kind: 'work', title: '作业纸' },
+                });
+              }}
             >
-              {downloadingKey === 'schid-work-pdf' ? (
-                <ActivityIndicator size="small" color="#fff" />
-              ) : (
-                <Text style={s.actionBtnText}>空白PDF</Text>
-              )}
+              <Text style={s.actionBtnText}>预览</Text>
             </Pressable>
             <Pressable
               style={[s.actionBtnSecondary, { flex: 1 }, downloadingKey !== null && s.btnDisabled]}
               disabled={downloadingKey !== null}
-              onPress={() => handleSchidDownload('workcorr', 'pdf')}
+              onPress={() => {
+                const id = scheduleId.trim();
+                if (!id) return;
+                router.push({
+                  pathname: '/paper-preview',
+                  params: { schid: id, kind: 'workcorr', title: '批改纸' },
+                });
+              }}
             >
-              {downloadingKey === 'schid-workcorr-pdf' ? (
-                <ActivityIndicator size="small" color={colors.accent} />
-              ) : (
-                <Text style={s.actionBtnSecondaryText}>批改PDF</Text>
-              )}
+              <Text style={s.actionBtnSecondaryText}>批改预览</Text>
             </Pressable>
           </View>
 
@@ -500,7 +522,7 @@ export default function PaperDownloadScreen() {
               {downloadingKey === 'schid-work-html' ? (
                 <ActivityIndicator size="small" color={colors.textSecondary} />
               ) : (
-                <Text style={s.actionBtnOutlineText}>空白HTML</Text>
+                <Text style={s.actionBtnOutlineText}>HTML</Text>
               )}
             </Pressable>
             <Pressable
