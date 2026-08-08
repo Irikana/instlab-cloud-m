@@ -25,7 +25,7 @@ import {
   WEEK_LABELS,
   type ScheduleEntry,
 } from '../src/lib/schedule';
-import { downloadPaperPdf, downloadPaperHtml, downloadPaperJson, type PaperKind } from '../src/lib/paper';
+import { downloadPaperPdf, downloadPaperHtml, downloadPaperJson, buildPaperRequestData, type PaperKind } from '../src/lib/paper';
 
 type Mode = 'calendar' | 'schid';
 
@@ -152,23 +152,7 @@ export default function PaperDownloadScreen() {
     const key = `${entry.schid}-${kind}-${fmt}`;
     setDownloadingKey(key);
     try {
-      // PC 端 Download_Paper_Work(r) 传的是整个日程条目对象 r（含 schid/planid/planexpid/expid/
-      // coursename/sch_date 等全部字段），不是只传 schid —— 服务器需要完整条目来生成作业纸内容
-      const schData: Record<string, unknown> = {
-        ...entry.raw,
-        schid: entry.schid,
-        planid: entry.planid ?? '',
-        planexpid: entry.planexpid ?? '',
-        // 日期用 PC 端格式 YYYY/MM/DD（作业布置/实验安排日期，而非下载当天）
-        sch_date: entry.date.replace(/-/g, '/'),
-        // 当前登录学生信息（服务器模板里的班级/学号/姓名需要这些）
-        userid: login ?? '',
-        stdid: login ?? '',
-        studentid: login ?? '',
-        studentname: userName ?? '',
-        name: userName ?? '',
-        univer: univer ?? '',
-      };
+      const schData = buildPaperRequestData(entry, { login, userName, univer });
       const label = kind === 'work' ? '课程作业纸' : '批改作业纸';
       const couName = entry.coursename || entry.title || '未知';
       const stdId = login || '';
@@ -408,6 +392,7 @@ export default function PaperDownloadScreen() {
                             kind: 'work',
                             title,
                             date: entry.date,
+                            data: JSON.stringify(buildPaperRequestData(entry, { login, userName, univer })),
                           },
                         });
                       }}
@@ -426,6 +411,7 @@ export default function PaperDownloadScreen() {
                             kind: 'workcorr',
                             title,
                             date: entry.date,
+                            data: JSON.stringify(buildPaperRequestData(entry, { login, userName, univer })),
                           },
                         });
                       }}

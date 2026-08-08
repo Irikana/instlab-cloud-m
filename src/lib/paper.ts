@@ -20,6 +20,43 @@ export interface PaperPayload {
 
 export type PaperKind = 'work' | 'workcorr';
 
+/**
+ * 组装与 PC 端 Download_Paper_Work(r) 相同的日程数据。
+ * 预览和直接导出必须使用同一份数据，否则服务器无法生成完整题目内容。
+ */
+export function buildPaperRequestData(
+  entry: {
+    schid: string;
+    planid?: string;
+    planexpid?: string;
+    expid?: string;
+    date: string;
+    raw: Record<string, unknown>;
+  },
+  identity: {
+    login?: string | null;
+    userName?: string | null;
+    univer?: string | null;
+  } = {},
+): Record<string, unknown> {
+  const login = identity.login ?? '';
+  const userName = identity.userName ?? '';
+  return {
+    ...entry.raw,
+    schid: entry.schid,
+    planid: entry.planid ?? '',
+    planexpid: entry.planexpid ?? '',
+    expid: entry.expid ?? '',
+    sch_date: entry.date.replace(/-/g, '/'),
+    userid: login,
+    stdid: login,
+    studentid: login,
+    studentname: userName,
+    name: userName,
+    univer: identity.univer ?? '',
+  };
+}
+
 /** 调用作业纸 API */
 export async function fetchPaper(kind: PaperKind, schData: Record<string, unknown>): Promise<PaperPayload> {
   const type = kind === 'work' ? 8 : 82;
@@ -38,7 +75,12 @@ export async function fetchPaper(kind: PaperKind, schData: Record<string, unknow
  */
 const WEEK_CN = ['日', '一', '二', '三', '四', '五', '六'];
 
-export function buildFullHtml(html: string, data: Record<string, unknown>, titlelogo?: string): string {
+export function buildFullHtml(
+  html: string,
+  data: Record<string, unknown>,
+  titlelogo?: string,
+  assignmentDate?: string,
+): string {
   let out = html;
 
   // ---- 顶部横幅：titlelogo 是作业纸顶部横幅（学校 logo + 「课程作业」标题），
@@ -64,13 +106,14 @@ export function buildFullHtml(html: string, data: Record<string, unknown>, title
     </style></head>`,
   );
 
-  // ---- 日期填充：用 sch_datestring（服务器返回的已格式化日期）----
-  const dateStr = String(data.sch_datestring ?? '');
+  // ---- 日期填充：调用方明确传入的作业布置日期优先于服务器格式化值 ----
+  const explicitDate = assignmentDate || (typeof data.sch_date === 'string' ? data.sch_date : '');
+  const dateStr = explicitDate ? '' : String(data.sch_datestring ?? '');
   if (dateStr) {
     out = out.replace(/\d{4}年\d{1,2}月\d{1,2}日 \(星期[一二三四五六日]\)[\s\S]{0,6}?\(节\)/g, dateStr);
     out = out.replace(/\d{4}年\d{1,2}月\d{1,2}日 \(星期[一二三四五六日]\)/g, dateStr);
   } else {
-    const schDate = data.sch_date ?? data.date ?? data.coursedatetime;
+    const schDate = explicitDate || data.date || data.coursedatetime;
     if (typeof schDate === 'string' && schDate) {
       const d = parseDate(schDate);
       if (d) {
@@ -154,7 +197,7 @@ export async function downloadPaperPdf(
   if (!html) {
     throw new Error('服务器未返回 HTML 模板，无法生成 PDF');
   }
-  const fullHtml = buildFullHtml(html, payload.data ?? {}, payload.titlelogo);
+  const fullHtml = buildFullHtml(html, payload.data ?? {}, payload.titlelogo, String(schData.sch_date ?? ''));
   return generatePaperPdf(fullHtml, fileName);
 }
 

@@ -24,12 +24,22 @@ export default function PaperPreviewScreen() {
     schid: string;
     kind: 'work' | 'workcorr';
     title?: string;
-    date?: string;
+    data?: string;
   }>();
 
   const schid = params.schid ?? '';
   const kind = (params.kind ?? 'work') as PaperKind;
   const displayTitle = params.title ?? '作业纸';
+  const requestData = (() => {
+    if (!params.data) return { schid };
+    try {
+      const parsed = JSON.parse(params.data);
+      return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : { schid };
+    } catch {
+      return { schid };
+    }
+  })();
+  const assignmentDate = typeof requestData.sch_date === 'string' ? requestData.sch_date : undefined;
 
   const [fullHtml, setFullHtml] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -51,10 +61,10 @@ export default function PaperPreviewScreen() {
     setError(null);
     setFullHtml(null);
     try {
-      const payload = await fetchPaper(kind, { schid });
+      const payload = await fetchPaper(kind, requestData);
       const html = payload.html ?? '';
       if (!html) throw new Error('服务器未返回 HTML 模板');
-      const built = buildFullHtml(html, payload.data ?? {}, payload.titlelogo);
+      const built = buildFullHtml(html, payload.data ?? {}, payload.titlelogo, assignmentDate);
       setFullHtml(built);
     } catch (e) {
       setError((e as Error).message);
