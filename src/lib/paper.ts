@@ -75,11 +75,68 @@ export async function fetchPaper(kind: PaperKind, schData: Record<string, unknow
  */
 const WEEK_CN = ['日', '一', '二', '三', '四', '五', '六'];
 
+const CODE128_B_PATTERNS = [
+  '212222','222122','222221','121223','121322','131222','122213','122312','132212','221213',
+  '221312','231212','112232','122132','122231','113222','123122','123221','223211','222311',
+  '132131','113123','113321','133121','313121','211331','231131','213113','213311','213131',
+  '311123','311321','331121','312113','312311','332111','314111','221411','431111','111224',
+  '111422','121124','121421','141122','141221','112214','112412','122114','122411','142112',
+  '142211','241211','221114','413111','241112','134111','111242','121142','121241','114212',
+  '124112','124211','411212','421112','421211','212141','214121','412121','111143','111341',
+  '131141','114113','114311','411113','411311','113141','114131','311141','411131','211412',
+  '211214','211232','233111','211133','211313','211331','221131','221311','231111','231311',
+  '112231','122131','122311','112213','112312','132112','132311','211123','211321','231121',
+  '312131','311231','331211','312112','312211','322111','322211','221412','431112','431211',
+  '212412','212214','212232','212133','212313','212331','222131','222311','232111','232311',
+  '112232','122132','122312','112214','112412','122114','122411','142112','142211','241211',
+  '221114','413111','241112','134111','111242','121142','121241','114212','124112','124211',
+  '411212','421112','421211','212141','214121','412121','111143','111341','131141','114113',
+  '114311','411113','411311','113141','114131','311141','411131','211412','211214','211232',
+  '233111','211133','211313','211331','221131','221311','231111','231311','112231','122131',
+  '122311','112213','112312','132112','132311','211123','211321','231121','312131','311231',
+  '331211','312112','312211','322111','322211','221411','431111','111224','111422','121124',
+  '121421','141122','141221','112214','112412','122114','122411','142112','142211','241211',
+  '221114','413111','241112','134111','111242','121142','121241','114212','124112','124211',
+  '411212','421112','421211','212141','214121','412121','111143','111341','131141','114113',
+  '114311','411113','411311','113141','114131','311141','411131','211412','211214','211232',
+  '233111','211133','211313','211331','221131','221311','231111','231311','112231','122131',
+  '122311','112213','112312','132112','132311','211123','211321','231121','312131','311231',
+  '331211','312112','312211','322111','322211','2331112',
+];
+
+function code128Svg(value: string): string {
+  const text = value.replace(/[^\x20-\x7e]/g, '');
+  if (!text) return '';
+  const codes = [104, ...Array.from(text, (c) => c.charCodeAt(0) - 32)];
+  const checksum = codes.reduce((sum, code, index) => sum + code * (index || 1), 0) % 103;
+  codes.push(checksum, 106);
+  let x = 0;
+  const rects: string[] = [];
+  for (const code of codes) {
+    const pattern = CODE128_B_PATTERNS[code];
+    let black = true;
+    for (const width of pattern.split('').map(Number)) {
+      if (black) rects.push(`<rect x="${x}" y="0" width="${width}" height="34"/>`);
+      x += width;
+      black = !black;
+    }
+  }
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${x} 34" preserveAspectRatio="none">${rects.join('')}</svg>`;
+}
+
+function makePaperIdentifier(data: Record<string, unknown>): string {
+  const id = String(data.id ?? data.paperid ?? data.workid ?? data.schid ?? '').replace(/\D/g, '');
+  return id ? `080100000${id}` : '';
+}
+
+function buildIdentifierBars(value: string): string {
+  return code128Svg(value);
+}
+
 export function buildFullHtml(
   html: string,
   data: Record<string, unknown>,
   titlelogo?: string,
-  assignmentDate?: string,
 ): string {
   let out = html;
 
@@ -106,24 +163,45 @@ export function buildFullHtml(
     </style></head>`,
   );
 
-  // ---- 日期填充：调用方明确传入的作业布置日期优先于服务器格式化值 ----
-  const explicitDate = assignmentDate || (typeof data.sch_date === 'string' ? data.sch_date : '');
-  const dateStr = explicitDate ? '' : String(data.sch_datestring ?? '');
+  // ---- 日期填充：优先使用纸张 API 返回的作业日期 ----
+  // sch_date 是日历中的课程安排日；它不能覆盖纸张接口返回的权威日期。
+  // JSON 中的 sch_datestring 仍是服务器实际生成的纸张日期；客户端不再用日历日期覆盖它。
+  const serverDate = String(data.paper_datestring ?? data.assignment_datestring ?? data.sch_datestring ?? '');
+  const serverDateRaw = typeof data.paper_date === 'string'
+    ? data.paper_date
+    : typeof data.assignment_date === 'string'
+      ? data.assignment_date
+      : typeof data.sch_date === 'string'
+        ? data.sch_date
+        : '';
+  const dateStr = serverDate || '';
   if (dateStr) {
     out = out.replace(/\d{4}年\d{1,2}月\d{1,2}日 \(星期[一二三四五六日]\)[\s\S]{0,6}?\(节\)/g, dateStr);
     out = out.replace(/\d{4}年\d{1,2}月\d{1,2}日 \(星期[一二三四五六日]\)/g, dateStr);
-  } else {
-    const schDate = explicitDate || data.date || data.coursedatetime;
-    if (typeof schDate === 'string' && schDate) {
-      const d = parseDate(schDate);
-      if (d) {
-        const fmt = `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 (星期${WEEK_CN[d.getDay()]})`;
-        out = out.replace(/\d{4}年\d{1,2}月\d{1,2}日 \(星期[一二三四五六日]\)/g, fmt);
-      }
+  } else if (serverDateRaw) {
+    const d = parseDate(serverDateRaw);
+    if (d) {
+      const fmt = `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 (星期${WEEK_CN[d.getDay()]})`;
+      out = out.replace(/\d{4}年\d{1,2}月\d{1,2}日 \(星期[一二三四五六日]\)/g, fmt);
     }
   }
 
-  // ---- 班级 / 学号 / 姓名：服务器返回的 html 已自带这些数据（通过 cookie/登录态），无需二次填充 ----
+  // ---- 右上角作业标识：PC PDF 使用作业 id 生成页首 Code128 标识 ----
+  const identifier = makePaperIdentifier(data);
+  if (identifier && out.includes('<body>')) {
+    const bars = buildIdentifierBars(identifier);
+    const barcode = `<div class="paper-identifier" aria-label="${identifier}">
+      ${bars}
+      <div class="paper-identifier-text">${identifier}</div>
+    </div>`;
+    out = out.replace('</head>', `<style>
+      .paper-identifier { position: absolute; top: 2mm; right: 15mm; width: 38mm; text-align: center; font-size: 7pt; line-height: 1; z-index: 5; }
+      .paper-identifier svg { display: block; width: 38mm; height: 7mm; }
+      .paper-identifier-bars { height: 7mm; white-space: nowrap; overflow: hidden; }
+      .paper-identifier-text { margin-top: 1mm; letter-spacing: .2mm; }
+    </style></head>`);
+    out = out.replace('<body>', `<body>\n${barcode}`);
+  }
 
   return out;
 }
@@ -197,7 +275,8 @@ export async function downloadPaperPdf(
   if (!html) {
     throw new Error('服务器未返回 HTML 模板，无法生成 PDF');
   }
-  const fullHtml = buildFullHtml(html, payload.data ?? {}, payload.titlelogo, String(schData.sch_date ?? ''));
+  const renderData = { ...schData, ...(payload.data ?? {}) };
+  const fullHtml = buildFullHtml(html, renderData, payload.titlelogo);
   return generatePaperPdf(fullHtml, fileName);
 }
 

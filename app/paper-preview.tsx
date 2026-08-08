@@ -39,7 +39,6 @@ export default function PaperPreviewScreen() {
       return { schid };
     }
   })();
-  const assignmentDate = typeof requestData.sch_date === 'string' ? requestData.sch_date : undefined;
 
   const [fullHtml, setFullHtml] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -64,7 +63,8 @@ export default function PaperPreviewScreen() {
       const payload = await fetchPaper(kind, requestData);
       const html = payload.html ?? '';
       if (!html) throw new Error('服务器未返回 HTML 模板');
-      const built = buildFullHtml(html, payload.data ?? {}, payload.titlelogo, assignmentDate);
+      const renderData = { ...requestData, ...(payload.data ?? {}) };
+      const built = buildFullHtml(html, renderData, payload.titlelogo);
       setFullHtml(built);
     } catch (e) {
       setError((e as Error).message);

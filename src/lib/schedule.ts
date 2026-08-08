@@ -53,7 +53,12 @@ export function normalizeDate(input: unknown): string {
     const d = new Date(Number(s.length === 10 ? s + '000' : s));
     if (!isNaN(d.getTime())) return formatDate(d);
   }
-  // 2025/04/15 或 2025-04-15 或带时间 "2025/04/15 14:00"
+  // 带时间/时区的日期必须先按本地时间解析，避免 UTC 时间被截断为前一天。
+  if (/[T ]\d{1,2}:\d{2}/.test(s) || /Z$|[+-]\d{2}:?\d{2}$/.test(s)) {
+    const timed = new Date(s);
+    if (!isNaN(timed.getTime())) return formatDate(timed);
+  }
+  // 2025/04/15 或 2025-04-15：日期-only 字符串按字面年月日处理，不经过时区转换。
   const m = s.match(/(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})/);
   if (m) {
     return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
