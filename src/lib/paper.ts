@@ -1,8 +1,3 @@
-// 作业纸 PDF 下载 — 与 PC 端 `PaperPDF_Work` 消息对应的手机端实现
-// 1. POST /api/paper/work     {type:8}    → {html, data, h2pargs, titlelogo}
-// 2. POST /api/paper/workcorr {type:82}   → 同上（批改后作业纸）
-// 3. 本地渲染 HTML → expo-print 生成 PDF → expo-sharing 分享/保存
-//    也可直接下载原始 HTML 文件（排错用）
 import { Platform } from 'react-native';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
@@ -20,27 +15,12 @@ export interface PaperPayload {
 
 export type PaperKind = 'work' | 'workcorr';
 
-/**
- * 组装与 PC 端 Download_Paper_Work(r) 相同的日程数据。
- * 预览和直接导出必须使用同一份数据，否则服务器无法生成完整题目内容。
- */
 export function buildPaperRequestData(
-  entry: {
-    schid: string;
-    planid?: string;
-    planexpid?: string;
-    expid?: string;
-    date: string;
-    raw: Record<string, unknown>;
-  },
-  identity: {
-    login?: string | null;
-    userName?: string | null;
-    univer?: string | null;
-  } = {},
+  entry: { schid: string; planid?: string; planexpid?: string; expid?: string; date: string; raw: Record<string, unknown> },
+  identity: { login?: string | null; userName?: string | null; univer?: string | null } = {},
 ): Record<string, unknown> {
   const login = identity.login ?? '';
-  const userName = identity.userName ?? '';
+  const name = identity.userName ?? '';
   return {
     ...entry.raw,
     schid: entry.schid,
@@ -51,279 +31,277 @@ export function buildPaperRequestData(
     userid: login,
     stdid: login,
     studentid: login,
-    studentname: userName,
-    name: userName,
+    studentname: name,
+    name,
     univer: identity.univer ?? '',
   };
 }
 
-/** 调用作业纸 API */
 export async function fetchPaper(kind: PaperKind, schData: Record<string, unknown>): Promise<PaperPayload> {
   const type = kind === 'work' ? 8 : 82;
   const path = kind === 'work' ? '/api/paper/work' : '/api/paper/workcorr';
   return post<PaperPayload>(path, { type, data: schData });
 }
 
-/**
- * 把 data 字段填进 html 模板 + 嵌入 titlelogo 底版图 + 填充班级/学号/姓名/日期。
- * PC 端 C# 收到 {html, data, titlelogo} 后：
- *   1. 用 titlelogo（base64 PNG）作为作业纸底版背景（2937x893，含预印刷表格/定位标记）
- *   2. 把 data 填入 html 的 infotable（班级/学号/姓名）
- *   3. 用 sch_date 替换日期为作业布置日
- *   4. 页面加载执行 DATAMatrix 脚本生成二维码
- * 我们复刻同样的流程。
- */
 const WEEK_CN = ['日', '一', '二', '三', '四', '五', '六'];
 
-const CODE128_B_PATTERNS = [
-  '212222','222122','222221','121223','121322','131222','122213','122312','132212','221213',
-  '221312','231212','112232','122132','122231','113222','123122','123221','223211','222311',
-  '132131','113123','113321','133121','313121','211331','231131','213113','213311','213131',
-  '311123','311321','331121','312113','312311','332111','314111','221411','431111','111224',
-  '111422','121124','121421','141122','141221','112214','112412','122114','122411','142112',
-  '142211','241211','221114','413111','241112','134111','111242','121142','121241','114212',
-  '124112','124211','411212','421112','421211','212141','214121','412121','111143','111341',
-  '131141','114113','114311','411113','411311','113141','114131','311141','411131','211412',
-  '211214','211232','233111','211133','211313','211331','221131','221311','231111','231311',
-  '112231','122131','122311','112213','112312','132112','132311','211123','211321','231121',
-  '312131','311231','331211','312112','312211','322111','322211','221412','431112','431211',
-  '212412','212214','212232','212133','212313','212331','222131','222311','232111','232311',
-  '112232','122132','122312','112214','112412','122114','122411','142112','142211','241211',
-  '221114','413111','241112','134111','111242','121142','121241','114212','124112','124211',
-  '411212','421112','421211','212141','214121','412121','111143','111341','131141','114113',
-  '114311','411113','411311','113141','114131','311141','411131','211412','211214','211232',
-  '233111','211133','211313','211331','221131','221311','231111','231311','112231','122131',
-  '122311','112213','112312','132112','132311','211123','211321','231121','312131','311231',
-  '331211','312112','312211','322111','322211','221411','431111','111224','111422','121124',
-  '121421','141122','141221','112214','112412','122114','122411','142112','142211','241211',
-  '221114','413111','241112','134111','111242','121142','121241','114212','124112','124211',
-  '411212','421112','421211','212141','214121','412121','111143','111341','131141','114113',
-  '114311','411113','411311','113141','114131','311141','411131','211412','211214','211232',
-  '233111','211133','211313','211331','221131','221311','231111','231311','112231','122131',
-  '122311','112213','112312','132112','132311','211123','211321','231121','312131','311231',
-  '331211','312112','312211','322111','322211','2331112',
-];
-
-function code128Svg(value: string): string {
-  const text = value.replace(/[^\x20-\x7e]/g, '');
-  if (!text) return '';
-  const codes = [104, ...Array.from(text, (c) => c.charCodeAt(0) - 32)];
-  const checksum = codes.reduce((sum, code, index) => sum + code * (index || 1), 0) % 103;
-  codes.push(checksum, 106);
-  let x = 0;
-  const rects: string[] = [];
-  for (const code of codes) {
-    const pattern = CODE128_B_PATTERNS[code];
-    let black = true;
-    for (const width of pattern.split('').map(Number)) {
-      if (black) rects.push(`<rect x="${x}" y="0" width="${width}" height="34"/>`);
-      x += width;
-      black = !black;
-    }
-  }
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${x} 34" preserveAspectRatio="none">${rects.join('')}</svg>`;
-}
-
-function makePaperIdentifier(data: Record<string, unknown>): string {
-  const id = String(data.id ?? data.paperid ?? data.workid ?? data.schid ?? '').replace(/\D/g, '');
-  return id ? `080100000${id}` : '';
-}
-
-function buildIdentifierBars(value: string): string {
-  return code128Svg(value);
-}
-
-export function buildFullHtml(
-  html: string,
-  data: Record<string, unknown>,
-  titlelogo?: string,
-): string {
+export function buildFullHtml(html: string, data: Record<string, unknown>, titlelogo?: string): string {
   let out = html;
-
-  // ---- 顶部横幅：titlelogo 是作业纸顶部横幅（学校 logo + 「课程作业」标题），
-  //      非全页背景。PC 端显示为：宽约 60.8mm × 高约 18.5mm，位于页面顶部左侧。----
-  if (titlelogo && titlelogo.startsWith('iVBOR')) {
-    // 在 body 开头插入 titlelogo 横幅 + 条形码占位
-    const banner = `<div style="width: 100%; margin: 0; padding: 0; text-align: left;">
-      <img src="data:image/png;base64,${titlelogo}"
-           style="width: 60.8mm; height: 18.5mm; display: block;" />
-    </div>
-    <div style="height: 5mm"></div>`;
-    // 在 <body> 后插入横幅（在现有第一个 div 之前）
-    out = out.replace('<body>', '<body>\n' + banner);
+  if (titlelogo) {
+    const image = titlelogo.startsWith('data:') ? titlelogo : `data:image/png;base64,${titlelogo}`;
+    const banner = `<div style="width:100%;margin:0;padding:0;text-align:left"><img src="${image}" style="width:60.8mm;height:18.5mm;display:block" /></div><div style="height:5mm"></div>`;
+    out = out.replace('<body>', `<body>\n${banner}`);
   }
+  out = out.replace('</head>', `<style>
+    @page { size: A4; margin: 0; }
+    html, body { width: 210mm; min-height: 297mm; margin: 0; padding: 0; }
+    body, table, td, th, div, span, p { font-family: 'Noto Serif SC', 'Source Han Serif SC', 'Songti SC', 'SimSun', serif; }
+  </style></head>`);
 
-  // ---- 字体兼容 ----
-  out = out.replace(
-    '</head>',
-    `<style>
-      body, table, td, th, div, span, p {
-        font-family: 'Noto Serif SC', 'Source Han Serif SC', 'Songti SC', 'SimSun', 'Noto Serif CJK SC', serif;
-      }
-    </style></head>`,
-  );
-
-  // ---- 日期填充：优先使用纸张 API 返回的作业日期 ----
-  // sch_date 是日历中的课程安排日；它不能覆盖纸张接口返回的权威日期。
-  // JSON 中的 sch_datestring 仍是服务器实际生成的纸张日期；客户端不再用日历日期覆盖它。
-  const serverDate = String(data.paper_datestring ?? data.assignment_datestring ?? data.sch_datestring ?? '');
-  const serverDateRaw = typeof data.paper_date === 'string'
-    ? data.paper_date
-    : typeof data.assignment_date === 'string'
-      ? data.assignment_date
-      : typeof data.sch_date === 'string'
-        ? data.sch_date
-        : '';
-  const dateStr = serverDate || '';
-  if (dateStr) {
-    out = out.replace(/\d{4}年\d{1,2}月\d{1,2}日 \(星期[一二三四五六日]\)[\s\S]{0,6}?\(节\)/g, dateStr);
-    out = out.replace(/\d{4}年\d{1,2}月\d{1,2}日 \(星期[一二三四五六日]\)/g, dateStr);
-  } else if (serverDateRaw) {
-    const d = parseDate(serverDateRaw);
+  const dateText = String(data.paper_datestring ?? data.assignment_datestring ?? data.sch_datestring ?? '');
+  const rawDate = typeof data.paper_date === 'string' ? data.paper_date
+    : typeof data.assignment_date === 'string' ? data.assignment_date
+      : typeof data.sch_date === 'string' ? data.sch_date : '';
+  if (dateText) {
+    out = out.replace(/\d{4}年\d{1,2}月\d{1,2}日 \(星期[一二三四五六日]\)/g, dateText);
+    out = out.replace(/\d{4}年\d{1,2}月\d{1,2}日 \(星期[一二三四五六日]\)/g, dateText);
+  } else if (rawDate) {
+    const d = parseDate(rawDate);
     if (d) {
-      const fmt = `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 (星期${WEEK_CN[d.getDay()]})`;
-      out = out.replace(/\d{4}年\d{1,2}月\d{1,2}日 \(星期[一二三四五六日]\)/g, fmt);
+      const formatted = `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 (星期${WEEK_CN[d.getDay()]})`;
+      out = out.replace(/\d{4}年\d{1,2}月\d{1,2}日 \(星期[一二三四五六日]\)/g, formatted);
     }
   }
-
-  // ---- 右上角作业标识：PC PDF 使用作业 id 生成页首 Code128 标识 ----
-  const identifier = makePaperIdentifier(data);
-  if (identifier && out.includes('<body>')) {
-    const bars = buildIdentifierBars(identifier);
-    const barcode = `<div class="paper-identifier" aria-label="${identifier}">
-      ${bars}
-      <div class="paper-identifier-text">${identifier}</div>
-    </div>`;
-    out = out.replace('</head>', `<style>
-      .paper-identifier { position: absolute; top: 2mm; right: 15mm; width: 38mm; text-align: center; font-size: 7pt; line-height: 1; z-index: 5; }
-      .paper-identifier svg { display: block; width: 38mm; height: 7mm; }
-      .paper-identifier-bars { height: 7mm; white-space: nowrap; overflow: hidden; }
-      .paper-identifier-text { margin-top: 1mm; letter-spacing: .2mm; }
-    </style></head>`);
-    out = out.replace('<body>', `<body>\n${barcode}`);
-  }
-
   return out;
 }
 
-/** 解析常见日期格式为 Date（YYYY/MM/DD、YYYY-MM-DD、时间戳） */
 function parseDate(input: string): Date | null {
-  const m = input.match(/(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})/);
-  if (m) {
-    const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
-    return isNaN(d.getTime()) ? null : d;
+  const match = input.match(/(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})/);
+  if (match) {
+    const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+    return isNaN(date.getTime()) ? null : date;
   }
-  const d = new Date(input);
-  return isNaN(d.getTime()) ? null : d;
+  const date = new Date(input);
+  return isNaN(date.getTime()) ? null : date;
 }
 
-/** 找到标签（如「学号：」）后的空 <td>...</td>，填入值 */
-/** 生成 PDF 并分享；返回 PDF 文件 uri（web 平台不可用） */
-export async function generatePaperPdf(
-  html: string,
-  fileName: string,
-): Promise<{ uri: string; shared: boolean }> {
-  if (Platform.OS === 'web') {
-    throw new Error('PDF 生成仅支持 Android/iOS，Web 端请使用 PC 客户端');
+// ========== 作业纸身份条码（与 PC 端 iText Code128 内容一致） ==========
+// PC 端 PDF 每页顶部条码已实际解码验证，内容 = 08 + 两位页码 + 作业ID补零到9位：
+//   作业 data.id=7717 → 第1页 0801000007717，第2页 0802000007717
+// 08 是 filetypeid（课程作业纸）；作业ID是服务器返回的 data.id（不是 schid/planid）。
+export function paperBarcodeValue(paperId: string | number, page: number): string {
+  const id = String(paperId ?? '').replace(/\D/g, '');
+  if (!id) return '';
+  return `08${String(page).padStart(2, '0')}${id.padStart(9, '0')}`;
+}
+
+// Code128 标准二进制条空表（ISO/IEC 15417，共 107 项：0-99 数据值，
+// 100=CodeB 切换、101=CodeA、102=FNC1、103-105=Start A/B/C、106=Stop）。
+// 1=黑条 0=白空，每个符号 11 模块（Stop 为 13 模块）。与 jsbarcode 一致。
+const CODE128_BITS = [
+  11011001100, 11001101100, 11001100110, 10010011000, 10010001100, 10001001100, 10011001000, 10011000100, 10001100100, 11001001000,
+  11001000100, 11000100100, 10110011100, 10011011100, 10011001110, 10111001100, 10011101100, 10011100110, 11001110010, 11001011100,
+  11001001110, 11011100100, 11001110100, 11101101110, 11101001100, 11100101100, 11100100110, 11101100100, 11100110100, 11100110010,
+  11011011000, 11011000110, 11000110110, 10100011000, 10001011000, 10001000110, 10110001000, 10001101000, 10001100010, 11010001000,
+  11000101000, 11000100010, 10110111000, 10110001110, 10001101110, 10111011000, 10111000110, 10001110110, 11101110110, 11010001110,
+  11000101110, 11011101000, 11011100010, 11011101110, 11101011000, 11101000110, 11100010110, 11101101000, 11101100010, 11100011010,
+  11101111010, 11001000010, 11110001010, 10100110000, 10100001100, 10010110000, 10010000110, 10000101100, 10000100110, 10110010000,
+  10110000100, 10011010000, 10011000010, 10000110100, 10000110010, 11000010010, 11001010000, 11110111010, 11000010100, 10001111010,
+  10100111100, 10010111100, 10010011110, 10111100100, 10011110100, 10011110010, 11110100100, 11110010100, 11110010010, 11011011110,
+  11011110110, 11110110110, 10101111000, 10100011110, 10001011110, 10111101000, 10111100010, 11110101000, 11110100010, 10111011110,
+  10111101110, 11101011110, 11110101110, 11010000100, 11010010000, 11010011100, 1100011101011,
+];
+
+/** Code128-C 编码为码值序列（两位数字一组，末位奇数时切 CodeB，含校验码与 Stop） */
+export function code128cCodes(value: string): number[] {
+  const text = String(value ?? '').replace(/[^\x20-\x7e]/g, '');
+  if (!text) return [];
+  const codes: number[] = [105]; // Start C
+  let i = 0;
+  while (i < text.length) {
+    if (text.length - i >= 2) {
+      codes.push(parseInt(text.substr(i, 2), 10));
+      i += 2;
+    } else {
+      codes.push(100); // 切 CodeB
+      codes.push(text.charCodeAt(i) - 32);
+      i += 1;
+    }
   }
+  let sum = codes[0];
+  for (let j = 1; j < codes.length; j++) sum += codes[j] * j;
+  codes.push(sum % 103);
+  codes.push(106); // Stop
+  return codes;
+}
 
-  const { uri } = await Print.printToFileAsync({ html });
+/** 把码值序列渲染为 SVG 竖条（条宽单位 = 1px 模块，可随容器缩放） */
+export function code128cSvg(value: string, barHeight = 34): string {
+  const codes = code128cCodes(value);
+  if (!codes.length) return '';
+  let x = 0;
+  const rects: string[] = [];
+  for (const code of codes) {
+    const bits = String(CODE128_BITS[code] ?? '');
+    for (const ch of bits) {
+      if (ch === '1') rects.push(`<rect x="${x}" y="0" width="1" height="${barHeight}"/>`);
+      x += 1;
+    }
+  }
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${x} ${barHeight}" preserveAspectRatio="none">${rects.join('')}</svg>`;
+}
 
+/** 页面顶部身份条码 HTML（条码 + 下方数字文本） */
+export function paperBarcodeHtml(paperId: string | number, page: number): string {
+  const value = paperBarcodeValue(paperId, page);
+  if (!value) return '';
+  return (
+    `<div class="paper-barcode" style="position:absolute;top:15mm;right:15mm;width:65mm;text-align:center;z-index:5;">` +
+    code128cSvg(value, 34) +
+    `<div style="font-size:7pt;letter-spacing:0.4mm;margin-top:1mm;font-family:monospace;">${value}</div>` +
+    `</div>`
+  );
+}
+
+/**
+ * 生成预览 WebView 的“测量分页 + 逐页条码”脚本。
+ * 在 A4 宽度布局下测量服务器 HTML 顶层块高度，按 PC 版心（上 30mm / 下 20mm /
+ * 左右 15mm，内容高 247mm）贪婪分页；每页包进 .paper-page 容器，并在每页右上角
+ * 插入与 PC 端内容一致的 Code128 身份条码（08 + 页码 + 作业ID）。
+ * 完成后通过 postMessage 把最终 HTML 发回 React Native 侧。
+ */
+export function buildPaginateScript(paperId: string | number): string {
+  const id = String(paperId ?? '').replace(/\D/g, '');
+  return `
+(function () {
+  try {
+    var paperId = '${id}';
+    var BITS = [11011001100,11001101100,11001100110,10010011000,10010001100,10001001100,10011001000,10011000100,10001100100,11001001000,11001000100,11000100100,10110011100,10011011100,10011001110,10111001100,10011101100,10011100110,11001110010,11001011100,11001001110,11011100100,11001110100,11101101110,11101001100,11100101100,11100100110,11101100100,11100110100,11100110010,11011011000,11011000110,11000110110,10100011000,10001011000,10001000110,10110001000,10001101000,10001100010,11010001000,11000101000,11000100010,10110111000,10110001110,10001101110,10111011000,10111000110,10001110110,11101110110,11010001110,11000101110,11011101000,11011100010,11011101110,11101011000,11101000110,11100010110,11101101000,11101100010,11100011010,11101111010,11001000010,11110001010,10100110000,10100001100,10010110000,10010000110,10000101100,10000100110,10110010000,10110000100,10011010000,10011000010,10000110100,10000110010,11000010010,11001010000,11110111010,11000010100,10001111010,10100111100,10010111100,10010011110,10111100100,10011110100,10011110010,11110100100,11110010100,11110010010,11011011110,11011110110,11110110110,10101111000,10100011110,10001011110,10111101000,10111100010,11110101000,11110100010,10111011110,10111101110,11101011110,11110101110,11010000100,11010010000,11010011100,1100011101011];
+
+    function pad2(n) { return n < 10 ? '0' + n : '' + n; }
+    function pad9(s) { s = String(s); while (s.length < 9) s = '0' + s; return s; }
+    function code128c(value) {
+      var codes = [105];
+      for (var i = 0; i < value.length;) {
+        if (value.length - i >= 2) { codes.push(parseInt(value.substr(i, 2), 10)); i += 2; }
+        else { codes.push(100); codes.push(value.charCodeAt(i) - 32); i += 1; }
+      }
+      var sum = codes[0];
+      for (var j = 1; j < codes.length; j++) sum += codes[j] * j;
+      codes.push(sum % 103);
+      codes.push(106);
+      var x = 0, rects = [];
+      for (var m = 0; m < codes.length; m++) {
+        var bits = String(BITS[codes[m]] || '');
+        for (var q = 0; q < bits.length; q++) {
+          if (bits.charAt(q) === '1') rects.push('<rect x="' + x + '" y="0" width="1" height="34"/>');
+          x += 1;
+        }
+      }
+      return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + x + ' 34" preserveAspectRatio="none">' + rects.join('') + '</svg>';
+    }
+
+    setTimeout(function () {
+      var body = document.body;
+      body.style.cssText = 'width:210mm;margin:0;padding:30mm 15mm 20mm;box-sizing:border-box;';
+      body.style.transform = 'none';
+
+      var blocks = [];
+      for (var ci = 0; ci < body.children.length; ci++) {
+        var el = body.children[ci];
+        var tag = el.tagName.toLowerCase();
+        if (tag === 'script' || tag === 'style' || tag === 'link') continue;
+        var r = el.getBoundingClientRect();
+        if (!r || r.height < 0.5) continue;
+        blocks.push({ el: el, h: r.height });
+      }
+
+      var pageH = 933.5; // 247mm @96dpi ≈ 933.5px（PC 端 -T30 -B20 版心高）
+      var pages = [[]], cur = 0;
+      for (var bi = 0; bi < blocks.length; bi++) {
+        var h = blocks[bi].h;
+        var used = 0;
+        for (var si = 0; si < pages[cur].length; si++) used += pages[cur][si].h;
+        if (pages[cur].length > 0 && used + h > pageH) { pages.push([]); cur++; }
+        pages[cur].push(blocks[bi]);
+      }
+
+      var headHtml = document.head ? document.head.outerHTML : '';
+      var out = '<!DOCTYPE html><html><head>' + headHtml + '</head><body>';
+      for (var pi = 0; pi < pages.length; pi++) {
+        var bv = '08' + pad2(pi + 1) + pad9(paperId);
+        var bc = code128c(bv);
+        var isLast = pi === pages.length - 1;
+        out += '<div class="paper-page" style="width:210mm;height:297mm;position:relative;margin:0;padding:0;box-sizing:border-box;' + (isLast ? '' : 'page-break-after:always;') + '">';
+        out += '<div style="padding:30mm 15mm 20mm;box-sizing:border-box;width:100%;">';
+        for (var pj = 0; pj < pages[pi].length; pj++) out += pages[pi][pj].el.outerHTML;
+        out += '</div>';
+        out += '<div class="paper-barcode" style="position:absolute;top:15mm;right:15mm;width:65mm;text-align:center;z-index:5;">' + bc + '<div style="font-size:7pt;letter-spacing:0.4mm;margin-top:1mm;font-family:monospace;">' + bv + '</div></div>';
+        out += '</div>';
+      }
+      out += '</body></html>';
+
+      if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) window.ReactNativeWebView.postMessage(out);
+      else if (window.parent && window.parent.postMessage) window.parent.postMessage(out, '*');
+    }, 250);
+  } catch (e) {
+    var err = '__PAGINATE_ERROR__' + String(e && e.message || e);
+    if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) window.ReactNativeWebView.postMessage(err);
+  }
+})();
+true;
+`;
+}
+
+export async function generatePaperPdf(html: string, fileName: string): Promise<{ uri: string; shared: boolean }> {
+  if (Platform.OS === 'web') throw new Error('PDF generation requires Android/iOS');
+  const { uri } = await Print.printToFileAsync({ html, width: 595, height: 842 });
   let shared = false;
   if (await Sharing.isAvailableAsync()) {
-    await Sharing.shareAsync(uri, {
-      mimeType: 'application/pdf',
-      dialogTitle: fileName,
-      UTI: 'com.adobe.pdf',
-    });
+    await Sharing.shareAsync(uri, { mimeType: 'application/pdf', dialogTitle: fileName, UTI: 'com.adobe.pdf' });
     shared = true;
   }
   return { uri, shared };
 }
 
-/** 生成原始 HTML 文件并分享（排错用：查看服务器返回的未渲染 HTML） */
-export async function generatePaperHtml(
-  html: string,
-  fileName: string,
-): Promise<{ uri: string; shared: boolean }> {
-  if (Platform.OS === 'web') {
-    throw new Error('HTML 文件生成仅支持 Android/iOS');
-  }
-  const safeName = fileName.replace(/[\\/:*?"<>|]/g, '_');
-  const file = new File(Paths.cache, safeName);
+export async function generatePaperHtml(html: string, fileName: string): Promise<{ uri: string; shared: boolean }> {
+  if (Platform.OS === 'web') throw new Error('HTML export requires Android/iOS');
+  const file = new File(Paths.cache, fileName.replace(/[\\/:*?"<>|]/g, '_'));
   file.write(html);
-
   let shared = false;
   if (await Sharing.isAvailableAsync()) {
-    await Sharing.shareAsync(file.uri, {
-      mimeType: 'text/html',
-      dialogTitle: fileName,
-    });
+    await Sharing.shareAsync(file.uri, { mimeType: 'text/html', dialogTitle: fileName });
     shared = true;
   }
   return { uri: file.uri, shared };
 }
 
-/** 便捷入口：调 API → 渲染 → 生成 PDF → 分享 */
-export async function downloadPaperPdf(
-  kind: PaperKind,
-  schData: Record<string, unknown>,
-  fileName: string,
-): Promise<{ uri: string; shared: boolean }> {
+export async function downloadPaperPdf(kind: PaperKind, schData: Record<string, unknown>, fileName: string) {
   const payload = await fetchPaper(kind, schData);
   const html = payload.html ?? '';
-  if (!html) {
-    throw new Error('服务器未返回 HTML 模板，无法生成 PDF');
-  }
-  const renderData = { ...schData, ...(payload.data ?? {}) };
-  const fullHtml = buildFullHtml(html, renderData, payload.titlelogo);
-  return generatePaperPdf(fullHtml, fileName);
+  if (!html) throw new Error('Server returned no HTML template');
+  return generatePaperPdf(buildFullHtml(html, { ...schData, ...(payload.data ?? {}) }, payload.titlelogo), fileName);
 }
 
-/** 便捷入口：调 API → 下载原始 HTML 文件（排错用） */
-export async function downloadPaperHtml(
-  kind: PaperKind,
-  schData: Record<string, unknown>,
-  fileName: string,
-): Promise<{ uri: string; shared: boolean }> {
+export async function downloadPaperHtml(kind: PaperKind, schData: Record<string, unknown>, fileName: string) {
   const payload = await fetchPaper(kind, schData);
-  const html = payload.html ?? '';
-  if (!html) {
-    throw new Error('服务器未返回 HTML 模板');
-  }
-  return generatePaperHtml(html, fileName);
+  if (!payload.html) throw new Error('Server returned no HTML template');
+  return generatePaperHtml(payload.html, fileName);
 }
 
-/** 生成完整响应 JSON 文件并分享（调试用：查看服务器返回的完整 data 字段，含题目数据） */
-export async function generatePaperJson(
-  payload: PaperPayload,
-  fileName: string,
-): Promise<{ uri: string; shared: boolean }> {
-  if (Platform.OS === 'web') {
-    throw new Error('JSON 文件生成仅支持 Android/iOS');
-  }
-  const json = JSON.stringify(payload, null, 2);
-  const safeName = fileName.replace(/[\\/:*?"<>|]/g, '_');
-  const file = new File(Paths.cache, safeName);
-  file.write(json);
-
+export async function generatePaperJson(payload: PaperPayload, fileName: string): Promise<{ uri: string; shared: boolean }> {
+  if (Platform.OS === 'web') throw new Error('JSON export requires Android/iOS');
+  const file = new File(Paths.cache, fileName.replace(/[\\/:*?"<>|]/g, '_'));
+  file.write(JSON.stringify(payload, null, 2));
   let shared = false;
   if (await Sharing.isAvailableAsync()) {
-    await Sharing.shareAsync(file.uri, {
-      mimeType: 'application/json',
-      dialogTitle: fileName,
-    });
+    await Sharing.shareAsync(file.uri, { mimeType: 'application/json', dialogTitle: fileName });
     shared = true;
   }
   return { uri: file.uri, shared };
 }
 
-/** 便捷入口：调 API → 下载完整响应 JSON（调试用） */
-export async function downloadPaperJson(
-  kind: PaperKind,
-  schData: Record<string, unknown>,
-  fileName: string,
-): Promise<{ uri: string; shared: boolean }> {
-  const payload = await fetchPaper(kind, schData);
-  return generatePaperJson(payload, fileName);
+export async function downloadPaperJson(kind: PaperKind, schData: Record<string, unknown>, fileName: string) {
+  return generatePaperJson(await fetchPaper(kind, schData), fileName);
 }
+

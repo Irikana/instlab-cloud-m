@@ -380,6 +380,7 @@ export default function PaperDownloadScreen() {
                   )}
 
                   <View style={s.entryActions}>
+                    <Text style={s.scanWarning}>正式提交扫描作业请优先使用电脑端生成的作业纸</Text>
                     <Pressable
                       style={[s.dlBtn, busy && s.btnDisabled]}
                       disabled={busy}
@@ -453,6 +454,13 @@ export default function PaperDownloadScreen() {
             <Text style={s.infoTitle}>实验ID 模式（测试用）</Text>
             <Text style={s.infoText}>
               直接输入实验安排ID（schid）下载对应作业纸。PC 端隐藏入口，仅用于验证猜想。
+            </Text>
+          </View>
+
+          <View style={s.infoBox}>
+            <Text style={s.infoTitle}>扫描提交提示</Text>
+            <Text style={s.infoText}>
+              手机端预览和打印使用 Android WebView，分页、条形码位置和机器扫描标记可能与电脑端不同。正式提交扫描作业请优先使用电脑端生成的作业纸。
             </Text>
           </View>
 
@@ -534,7 +542,8 @@ export default function PaperDownloadScreen() {
             <Text style={s.tipText}>• POST /api/paper/work {`{ type: 8, data: { schid } }`}</Text>
             <Text style={s.tipText}>• POST /api/paper/workcorr {`{ type: 82, data: { schid } }`}</Text>
             <Text style={s.tipText}>• 返回 JSON：{`{ html, data, h2pargs, titlelogo }`}</Text>
-            <Text style={s.tipText}>• 手机端：渲染 HTML → expo-print 生成 PDF → 系统分享保存</Text>
+            <Text style={s.tipText}>• 批改后作业图片由电脑端扫描/文件流程提供，不能用普通作业纸 JSON 代替</Text>
+            <Text style={s.tipText}>• 手机端：渲染 HTML → Android WebView 打印，仅用于预览/普通打印</Text>
           </View>
         </>
       )}
@@ -652,6 +661,7 @@ const createStyles = (COLORS: Palette) =>
     statusDuty: { color: '#b45309', backgroundColor: '#fff7ed', borderWidth: 1, borderColor: '#f97316' },
     statusMark: { color: COLORS.accent, backgroundColor: COLORS.infoBg, borderWidth: 1, borderColor: COLORS.accentLight },
     entryActions: { flexDirection: 'row', marginTop: SPACING.sm },
+    scanWarning: { position: 'absolute', top: -18, left: 0, right: 0, fontSize: 10, color: COLORS.warning },
     dlBtn: {
       flex: 1,
       backgroundColor: COLORS.accent,

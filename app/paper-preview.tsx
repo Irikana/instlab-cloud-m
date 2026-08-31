@@ -14,7 +14,12 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { SPACING, useTheme, type Palette } from '../src/theme';
-import { fetchPaper, buildFullHtml, type PaperKind } from '../src/lib/paper';
+import {
+  fetchPaper,
+  buildFullHtml,
+  buildPaginateScript,
+  type PaperKind,
+} from '../src/lib/paper';
 
 export default function PaperPreviewScreen() {
   const { colors } = useTheme();
@@ -41,6 +46,9 @@ export default function PaperPreviewScreen() {
   })();
 
   const [fullHtml, setFullHtml] = useState<string | null>(null);
+  const [serverHtml, setServerHtml] = useState<string | null>(null);
+  const [paperId, setPaperId] = useState<string>('');
+  const [measureDone, setMeasureDone] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [processing, setProcessing] = useState(false);
@@ -59,13 +67,24 @@ export default function PaperPreviewScreen() {
     setLoading(true);
     setError(null);
     setFullHtml(null);
+    setServerHtml(null);
+    setMeasureDone(false);
+    setPaperId('');
     try {
       const payload = await fetchPaper(kind, requestData);
       const html = payload.html ?? '';
       if (!html) throw new Error('服务器未返回 HTML 模板');
       const renderData = { ...requestData, ...(payload.data ?? {}) };
       const built = buildFullHtml(html, renderData, payload.titlelogo);
-      setFullHtml(built);
+      // PC 条码内容使用服务器返回的 data.id（作业记录 ID）
+      const rawId = String(payload.data?.id ?? requestData.id ?? '').replace(/\D/g, '');
+      setPaperId(rawId);
+      setServerHtml(built);
+      // 没有作业 ID 时无法生成身份条码，直接按未分页 HTML 展示/打印
+      if (!rawId) {
+        setFullHtml(built);
+        setMeasureDone(true);
+      }
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -73,7 +92,22 @@ export default function PaperPreviewScreen() {
     }
   }
 
-  // 注入 JS：在手机屏上缩放 A4 内容
+  /** 测量 WebView 回调：收到分页后的最终 HTML */
+  const onMeasureMessage = (event: { nativeEvent: { data?: string } }) => {
+    const data = event.nativeEvent.data ?? '';
+    if (data.startsWith('__PAGINATE_ERROR__')) {
+      setError(data.replace('__PAGINATE_ERROR__', '分页失败：'));
+      setFullHtml(serverHtml); // 降级为未分页
+      setMeasureDone(true);
+      return;
+    }
+    if (data.startsWith('<!DOCTYPE') || data.startsWith('<html')) {
+      setFullHtml(data);
+      setMeasureDone(true);
+    }
+  };
+
+  // 注入 JS：在手机屏上缩放 A4 内容（仅展示阶段）
   const injectedJs = `
     (function() {
       var meta = document.querySelector('meta[name="viewport"]');
@@ -118,7 +152,11 @@ export default function PaperPreviewScreen() {
     if (!fullHtml) return;
     setProcessing(true);
     try {
-      const { uri } = await Print.printToFileAsync({ html: fullHtml });
+      const { uri } = await Print.printToFileAsync({
+        html: fullHtml,
+        width: 595,
+        height: 842,
+      });
       if (await Sharing.isAvailableAsync()) {
         await Sharing.shareAsync(uri, {
           mimeType: 'application/pdf',
@@ -162,6 +200,26 @@ export default function PaperPreviewScreen() {
             <Text style={s.retryText}>重试</Text>
           </Pressable>
         </View>
+      ) : serverHtml && !measureDone ? (
+        // 第一遍：A4 宽度布局下测量分页，生成逐页条码 HTML
+        <WebView
+          style={s.webview}
+          source={{ html: serverHtml }}
+          originWhitelist={['*']}
+          javaScriptEnabled={true}
+          domStorageEnabled={true}
+          startInLoadingState={true}
+          renderLoading={() => (
+            <ActivityIndicator
+              size="large"
+              color={colors.accent}
+              style={s.webviewLoading}
+            />
+          )}
+          injectedJavaScript={buildPaginateScript(paperId)}
+          onMessage={onMeasureMessage}
+          onError={() => setError('WebView 加载失败')}
+        />
       ) : fullHtml ? (
         <WebView
           style={s.webview}
