@@ -6,7 +6,7 @@ import Constants from 'expo-constants';
 import { useAuthStore } from '../src/store/auth-store';
 import { SPACING, useTheme, type Palette } from '../src/theme';
 
-const APP_VERSION = Constants.expoConfig?.version ?? '0.1.0';
+const APP_VERSION = Constants.expoConfig?.version ?? '0.0.0';
 
 interface FeatureItem {
   title: string;
@@ -42,7 +42,7 @@ export default function HomeScreen() {
   const FEATURES: FeatureItem[] = [
     {
       title: '下载作业纸',
-      desc: '日历选日期，下载空白/批改后作业纸 PDF',
+      desc: '按学期与日期挑选安排，预览并打印作业纸',
       href: '/paper-download',
       enabled: true,
     },
@@ -72,7 +72,7 @@ export default function HomeScreen() {
     },
     {
       title: '检查更新',
-      desc: '查看最新版本、下载 APK、访问官网',
+      desc: '查看最新版本，在应用内下载并安装',
       href: '/updates',
       enabled: true,
     },
@@ -85,7 +85,7 @@ export default function HomeScreen() {
   ];
 
   const handleLogout = () => {
-    confirmDialog('退出登录', '确定要退出吗？Token 将从本机清除。', () => logout());
+    confirmDialog('退出登录', '确定要退出吗？本机的登录会话将被清除。', () => logout());
   };
 
   return (

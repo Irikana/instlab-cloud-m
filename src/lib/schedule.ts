@@ -123,37 +123,26 @@ export async function fetchTermList(): Promise<Term[]> {
   return (r as { list_data?: Term[] }).list_data ?? [];
 }
 
-/** 获取日程条目：/api/schedule + /api/scheduleth（PC 端返回数组 e.data），失败返回空 */
-export async function fetchScheduleEntries(termId: string, userId: string): Promise<ScheduleEntry[]> {
+/** 获取日程条目：/api/schedule + /api/scheduleth（PC 端返回数组 e.data） */
+export async function fetchScheduleEntries(termId: string): Promise<ScheduleEntry[]> {
   const entries: ScheduleEntry[] = [];
   const params = `termid=${encodeURIComponent(termId)}&collegeid=0&type=schedule`;
 
-  // 实验日程 /api/schedule
-  try {
-    const r = await get<unknown[] | { list_data?: unknown[] }>(
-      `/api/schedule?${params}`,
-    );
+  const collect = async (path: string) => {
+    const r = await get<unknown[] | { list_data?: unknown[] }>(path);
     const list = Array.isArray(r) ? (r as unknown[]) : (r as { list_data?: unknown[] }).list_data ?? [];
     entries.push(...list
       .map((it) => extractEntry(it as Record<string, unknown>))
       .filter((e): e is ScheduleEntry => e !== null));
-  } catch {
-    // 忽略，继续理论课
-  }
+  };
 
-  // 理论课日程 /api/scheduleth
-  try {
-    const r = await get<unknown[] | { list_data?: unknown[] }>(
-      `/api/scheduleth?${params}`,
-    );
-    const list = Array.isArray(r) ? (r as unknown[]) : (r as { list_data?: unknown[] }).list_data ?? [];
-    entries.push(...list
-      .map((it) => extractEntry(it as Record<string, unknown>))
-      .filter((e): e is ScheduleEntry => e !== null));
-  } catch {
-    // 忽略
+  // 两个日程接口分别对应实验与理论课；只有一个可用是正常情况（例如学生账号没有理论课），
+  // 但两个都失败时必须把错误抛出去——否则界面只会显示一张空白日历，看不出是没登录。
+  const results = await Promise.allSettled([collect(`/api/schedule?${params}`), collect(`/api/scheduleth?${params}`)]);
+  if (results.every((r) => r.status === 'rejected')) {
+    const failed = results.find((r) => r.status === 'rejected') as PromiseRejectedResult;
+    throw failed.reason instanceof Error ? failed.reason : new Error('日程加载失败');
   }
-
   return entries;
 }
 

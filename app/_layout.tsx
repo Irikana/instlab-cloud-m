@@ -50,6 +50,7 @@ export default function RootLayout() {
         <Stack.Screen name="login" options={{ title: '登录', headerShown: false }} />
         <Stack.Screen name="settings" options={{ title: '设置' }} />
         <Stack.Screen name="updates" options={{ title: '检查更新' }} />
+        <Stack.Screen name="changelog" options={{ title: '更新日志' }} />
         <Stack.Screen name="paper-download" options={{ title: '下载作业纸' }} />
         <Stack.Screen name="paper-preview" options={{ title: '作业纸预览', headerShown: false }} />
         <Stack.Screen name="report" options={{ title: '实验报告' }} />

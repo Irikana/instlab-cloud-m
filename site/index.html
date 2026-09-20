@@ -32,7 +32,7 @@
             <p>INSTLAB CLOUD M 是基于 cloud.instlab.cn 服务开发的移动端教学管理 App（Android），支持登录后查看实验安排、下载作业纸 PDF 等。</p>
             <div class="function-box-blue">
               <div class="left-align">
-                <strong>当前版本：<span id="current-version">v0.0.4</span></strong><br>
+                <strong>当前版本：<span id="current-version">v0.0.10</span></strong><br>
                 通过下方按钮下载安装包（APK）。安装前请允许安装未知来源应用。
               </div>
             </div>
@@ -43,10 +43,10 @@
           <h2 id="section-2" class="section-title-text-main">功能</h2>
           <div class="section-content">
             <p><strong>登录</strong>：学号/工号 + 密码 + 验证码 + 学校代码，与 PC 端一致。</p>
-            <p><strong>日历日程</strong>：按日期查看实验/理论课/值日安排，日历标注配色与 PC 端一致（实验橙、作业蓝）。</p>
-            <p><strong>作业纸下载</strong>：一键下载空白作业纸 / 批改后作业纸 PDF，支持下载原始 HTML 排错。</p>
+            <p><strong>日历日程</strong>：切换学期后按日期查看实验/理论课/值日安排，日历标注配色与 PC 端一致（实验橙、作业蓝）。</p>
+            <p><strong>作业纸</strong>：按学期与日期打开作业纸，版心与页边距取自服务器下发的电脑端出图参数，可打印或导出 PDF，每页带与电脑端一致的 Code128 身份条码。</p>
             <p><strong>主题</strong>：Cloud Lite（#00695C）/ Quasar / 深色等多套主题。</p>
-            <p><strong>更新检查</strong>：App 内直接检查最新版本并下载。</p>
+            <p><strong>更新检查</strong>：App 内直接检查最新版本，下载并在系统里完成安装；更新日志离线内置。</p>
           </div>
         </section>
 
@@ -105,12 +105,12 @@
     function openNavigator() {
       window.open('https://irikana.github.io/navigator.html', '_blank');
     }
-    // 版本动态化：从 GitHub Releases 读取最新 tag（按版本号取最大），失败时保留静态回退值
+    // 版本动态化：从 GitHub Releases 读取最新发布版；取不到时保留静态回退值
     (function () {
-      var fallback = 'v0.0.6';
+      var fallback = 'v0.0.10';
       var el = document.getElementById('current-version');
       function apply(v) { if (el && v) el.textContent = v; }
-      fetch('https://api.github.com/repos/Irikana/instlab-cloud-m/releases?per_page=10')
+      fetch('https://api.github.com/repos/Irikana/instlab-cloud-m/releases?per_page=30')
         .then(function (r) { return r.ok ? r.json() : null; })
         .then(function (list) {
           if (!list || !list.length) { apply(fallback); return; }
@@ -118,7 +118,7 @@
           var best = null;
           for (var i = 0; i < list.length; i++) {
             var rel = list[i];
-            if (rel.draft) continue;
+            if (rel.draft || rel.prerelease) continue;
             if (!best || new Date(rel.published_at) > new Date(best.published_at)) best = rel;
           }
           apply(best ? best.tag_name : fallback);

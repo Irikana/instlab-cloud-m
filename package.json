@@ -1,6 +1,6 @@
 {
   "name": "instlab-cloud-m",
-  "version": "0.0.9.2",
+  "version": "0.0.10",
   "main": "expo-router/entry",
   "dependencies": {
     "@expo/metro-runtime": "~57.0.8",
@@ -29,6 +29,7 @@
   "devDependencies": {
     "@babel/core": "^7.27.1",
     "@types/react": "~19.2.2",
+    "subset-font": "^2.7.0",
     "typescript": "~6.0.3"
   },
   "scripts": {
@@ -39,4 +40,3 @@
   },
   "private": true
 }
-

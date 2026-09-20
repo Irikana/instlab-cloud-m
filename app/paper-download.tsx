@@ -1,11 +1,12 @@
 // 作业纸下载（核心功能）
-// 两种模式：
-//   1. 日历查看：选择日期 → 显示该日实验/理论/值日安排 → 下载作业纸 PDF
-//   2. 实验ID：直接输入 schid 下载（测试用，PC 端隐藏入口）
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+// 日历查看：选学期 → 选日期 → 显示该日实验/理论/值日安排 → 预览并打印作业纸
+// 顶部的「实验ID」是电脑版的隐藏入口，只在设置里打开开发者模式后才出现。
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  FlatList,
+  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -15,17 +16,25 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '../src/store/auth-store';
+import { useTermStore } from '../src/store/term-store';
+import { useSettingsStore } from '../src/store/settings-store';
 import { SPACING, useTheme, type Palette, CALENDAR_COLORS } from '../src/theme';
 import {
   fetchScheduleEntries,
-  fetchTermList,
   formatDate,
   kindLabel,
   todayStr,
   WEEK_LABELS,
   type ScheduleEntry,
 } from '../src/lib/schedule';
-import { downloadPaperPdf, downloadPaperHtml, downloadPaperJson, buildPaperRequestData, type PaperKind } from '../src/lib/paper';
+import {
+  buildPaperRequestData,
+  downloadRawHtml,
+  downloadRawJson,
+  fetchPaper,
+  type PaperKind,
+} from '../src/lib/paper';
+import { isUnauthorized } from '../src/lib/api';
 
 type Mode = 'calendar' | 'schid';
 
@@ -39,19 +48,28 @@ export default function PaperDownloadScreen() {
   const userName = useAuthStore((st) => st.userName);
   const userRole = useAuthStore((st) => st.userRole);
   const univer = useAuthStore((st) => st.univer);
+  const isTeacher = useAuthStore((st) => st.isTeacher);
+  const forceLogout = useAuthStore((st) => st.forceLogout);
+  const devMode = useSettingsStore((st) => st.devMode);
 
   // 模式
   const [mode, setMode] = useState<Mode>('calendar');
 
+  // 学期（与电脑版一样可切换，选择会被记住）
+  const terms = useTermStore((st) => st.terms);
+  const termId = useTermStore((st) => st.currentId);
+  const setTerm = useTermStore((st) => st.setTerm);
+  const loadTerms = useTermStore((st) => st.loadTerms);
+  const [termsOpen, setTermsOpen] = useState(false);
+
   // 日历状态
-  const now = new Date();
-  const [viewYear, setViewYear] = useState(now.getFullYear());
-  const [viewMonth, setViewMonth] = useState(now.getMonth());
+  const [viewYear, setViewYear] = useState(() => new Date().getFullYear());
+  const [viewMonth, setViewMonth] = useState(() => new Date().getMonth());
   const [selectedDate, setSelectedDate] = useState(todayStr());
 
   // 数据
-  const [entriesByDate, setEntriesByDate] = useState<Map<string, ScheduleEntry[]>>(new Map());
-  const [termName, setTermName] = useState('');
+  const [entries, setEntries] = useState<ScheduleEntry[]>([]);
+  const [reloadTick, setReloadTick] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [downloadingKey, setDownloadingKey] = useState<string | null>(null);
@@ -59,42 +77,71 @@ export default function PaperDownloadScreen() {
   // schid 测试模式
   const [scheduleId, setScheduleId] = useState('');
 
-  /** 加载学期 + 全部日程 */
-  const load = useCallback(async () => {
+  useEffect(() => {
+    loadTerms().catch(() => {
+      // 列表拉不到时界面已有错误提示，不再重复弹窗
+    });
+  }, [loadTerms, login]);
+
+  /** 拉取所选学期的全部日程 */
+  useEffect(() => {
+    if (!termId) return;
+    let cancelled = false;
     setLoading(true);
     setError(null);
-    try {
-      const terms = await fetchTermList();
-      if (!terms.length) throw new Error('未获取到学期列表，请检查登录状态');
-      const term = terms[0];
-      setTermName(term.name ?? '');
-      const entries = await fetchScheduleEntries(term.id, login ?? '');
-      const map = new Map<string, ScheduleEntry[]>();
-      for (const e of entries) {
-        const arr = map.get(e.date) ?? [];
-        arr.push(e);
-        map.set(e.date, arr);
-      }
-      setEntriesByDate(map);
-      // 若今天无安排，跳到第一个有安排的日期
-      if (!map.has(selectedDate) && map.size > 0) {
-        const first = [...map.keys()].sort()[0];
-        setSelectedDate(first);
-        const d = new Date(first + 'T00:00:00');
-        setViewYear(d.getFullYear());
-        setViewMonth(d.getMonth());
-      }
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setLoading(false);
-    }
-  }, [login, selectedDate]);
+    fetchScheduleEntries(termId)
+      .then((list) => {
+        if (!cancelled) setEntries(list);
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        // 会话过期就直接带回登录页，不让人对着空白日历自己猜
+        if (isUnauthorized(e)) {
+          void forceLogout('登录已失效，请重新登录后再查看学期安排');
+          return;
+        }
+        setError((e as Error).message);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [termId, reloadTick, login]);
 
+  /** 有安排的日期表 */
+  const entriesByDate = useMemo(() => {
+    const map = new Map<string, ScheduleEntry[]>();
+    for (const e of entries) {
+      const arr = map.get(e.date) ?? [];
+      arr.push(e);
+      map.set(e.date, arr);
+    }
+    return map;
+  }, [entries]);
+
+  // 换学期后若今天没安排，落到该学期第一个有安排的日期（每个学期只做一次，
+  // 否则用户手动点空白日期会被弹走）
+  const locatedFor = useRef<string | null>(null);
   useEffect(() => {
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    if (!termId || loading || locatedFor.current === termId) return;
+    if (entriesByDate.size === 0) return;
+    locatedFor.current = termId;
+    if (entriesByDate.has(selectedDate)) return;
+    const first = [...entriesByDate.keys()].sort()[0];
+    setSelectedDate(first);
+    const d = new Date(first + 'T00:00:00');
+    setViewYear(d.getFullYear());
+    setViewMonth(d.getMonth());
+  }, [termId, loading, entriesByDate, selectedDate]);
+
+  const termName = terms.find((t) => t.id === termId)?.name ?? '';
+
+  const reload = useCallback(() => {
+    loadTerms(true).catch(() => {});
+    setReloadTick((n) => n + 1);
+  }, [loadTerms]);
 
   /** 有安排的日期 → 事件颜色类型（PC 端规则：实验=orange、理论=blue、都有=purple） */
   const dateColors = useMemo(() => {
@@ -147,83 +194,61 @@ export default function PaperDownloadScreen() {
   /** 日历格子上的日期 key */
   const dateKeyOf = (day: number) => `${viewYear}-${pad2(viewMonth + 1)}-${pad2(day)}`;
 
-  /** 下载作业纸（从日程条目） */
-  const handleEntryDownload = async (entry: ScheduleEntry, kind: PaperKind, fmt: 'pdf' | 'html' | 'json' = 'pdf') => {
-    const key = `${entry.schid}-${kind}-${fmt}`;
+  /** 进入预览/打印（手机端唯一的出图路径，与下载 PDF 同一份文档） */
+  const goPreview = (entry: { schid: string; date: string; coursename?: string; title: string; raw: Record<string, unknown> }, kind: PaperKind) => {
+    const title = entry.coursename || entry.title || (kind === 'work' ? '作业' : '批改');
+    router.push({
+      pathname: '/paper-preview',
+      params: {
+        schid: entry.schid,
+        kind,
+        title,
+        data: JSON.stringify(buildPaperRequestData(entry as ScheduleEntry, { login, userName, univer })),
+      },
+    });
+  };
+
+  const dumpFileName = (kind: PaperKind, tag: string, date: string, fmt: string) => {
+    const label = kind === 'work' ? '课程作业纸' : '批改作业纸';
+    return `${label}_${tag}_${(login || '').replace(/[\\/:*?"<>|]/g, '_')}_${(userName || '').replace(/[\\/:*?"<>|]/g, '_')}_${date.replace(/-/g, '')}.${fmt}`;
+  };
+
+  /** 导出服务器原样返回的 HTML / JSON，用于与电脑版对照排查（开发者模式可见） */
+  const handleDump = async (
+    source: { tag: string; date: string },
+    schData: Record<string, unknown>,
+    kind: PaperKind,
+    fmt: 'html' | 'json',
+  ) => {
+    const key = `${source.tag}-${kind}-${fmt}`;
     setDownloadingKey(key);
     try {
-      const schData = buildPaperRequestData(entry, { login, userName, univer });
-      const label = kind === 'work' ? '课程作业纸' : '批改作业纸';
-      const couName = entry.coursename || entry.title || '未知';
-      const stdId = login || '';
-      const stdName = userName || '';
-      const datePart = entry.date.replace(/-/g, '');
-      const fileName = `${label}_${couName}_${stdId}_${stdName}_${datePart}.${fmt}`;
-      if (fmt === 'html') {
-        const res = await downloadPaperHtml(kind, schData, fileName);
-        Alert.alert(
-          'HTML 已生成',
-          res.shared
-            ? '请在系统分享面板中选择保存位置。\n\n' + res.uri
-            : '文件已生成：\n' + res.uri,
-        );
-      } else if (fmt === 'json') {
-        const res = await downloadPaperJson(kind, schData, fileName);
-        Alert.alert(
-          'JSON 已生成（完整响应）',
-          res.shared
-            ? '请在系统分享面板中选择保存位置，用于分析服务器返回的完整 data。\n\n' + res.uri
-            : '文件已生成：\n' + res.uri,
-        );
-      } else {
-        const res = await downloadPaperPdf(kind, schData, fileName);
-        Alert.alert(
-          'PDF 已生成',
-          res.shared
-            ? '请在系统分享面板中选择保存位置。\n\n' + res.uri
-            : '文件已生成：\n' + res.uri,
-        );
-      }
+      const payload = await fetchPaper(kind, schData);
+      const fileName = dumpFileName(kind, source.tag, source.date, fmt);
+      const res = fmt === 'html'
+        ? await downloadRawHtml(payload, fileName)
+        : await downloadRawJson(payload, fileName);
+      Alert.alert(
+        fmt === 'html' ? '服务器 HTML 已导出' : '服务器 JSON 已导出',
+        res.shared
+          ? '请在系统分享面板中选择保存位置。\n\n' + res.uri
+          : '文件已生成：\n' + res.uri,
+      );
     } catch (e) {
-      Alert.alert('下载失败', (e as Error).message);
+      Alert.alert('导出失败', (e as Error).message);
     } finally {
       setDownloadingKey(null);
     }
   };
 
-  /** 下载作业纸（schid 测试模式） */
-  const handleSchidDownload = async (kind: PaperKind, fmt: 'pdf' | 'html' = 'pdf') => {
+  /** schid 测试模式：只导出服务器响应，出图仍走预览页 */
+  const handleSchidDump = async (kind: PaperKind, fmt: 'html' | 'json') => {
     const id = scheduleId.trim();
     if (!id) {
       Alert.alert('提示', '请输入实验安排ID（schid）');
       return;
     }
-    setDownloadingKey('schid-' + kind + '-' + fmt);
-    try {
-      const schLabel = kind === 'work' ? '课程作业纸' : '批改作业纸';
-      const schFileName = `${schLabel}_${id}.${fmt}`;
-      if (fmt === 'html') {
-        const res = await downloadPaperHtml(kind, { schid: id }, schFileName);
-        Alert.alert(
-          'HTML 已生成',
-          res.shared
-            ? '请在系统分享面板中选择保存位置。\n\n' + res.uri
-            : '文件已生成：\n' + res.uri,
-        );
-      } else {
-        const res = await downloadPaperPdf(kind, { schid: id }, schFileName);
-        Alert.alert(
-          'PDF 已生成',
-          res.shared
-            ? '请在系统分享面板中选择保存位置。\n\n' + res.uri
-            : '文件已生成：\n' + res.uri,
-        );
-      }
-    } catch (e) {
-      Alert.alert('下载失败', (e as Error).message);
-    } finally {
-      setDownloadingKey(null);
-    }
+    await handleDump({ tag: id, date: todayStr() }, { schid: id }, kind, fmt);
   };
 
   const selectedDateLabel = (() => {
@@ -231,32 +256,43 @@ export default function PaperDownloadScreen() {
     return `${y}年${m}月${d}日`;
   })();
 
+  const showSchid = mode === 'schid' && devMode;
+
   return (
     <ScrollView style={s.container} contentContainerStyle={s.content}>
-      {/* 模式切换 */}
-      <View style={s.tabs}>
-        <Pressable
-          style={[s.tab, mode === 'calendar' && s.tabActive]}
-          onPress={() => setMode('calendar')}
-        >
-          <Text style={[s.tabText, mode === 'calendar' && s.tabTextActive]}>日历查看</Text>
-        </Pressable>
-        <Pressable
-          style={[s.tab, mode === 'schid' && s.tabActive]}
-          onPress={() => setMode('schid')}
-        >
-          <Text style={[s.tabText, mode === 'schid' && s.tabTextActive]}>实验ID</Text>
-        </Pressable>
-      </View>
+      {/* 模式切换：实验ID 只在开发者模式下出现（电脑版的隐藏入口） */}
+      {devMode && (
+        <View style={s.tabs}>
+          <Pressable
+            style={[s.tab, !showSchid && s.tabActive]}
+            onPress={() => setMode('calendar')}
+          >
+            <Text style={[s.tabText, !showSchid && s.tabTextActive]}>日历查看</Text>
+          </Pressable>
+          <Pressable
+            style={[s.tab, showSchid && s.tabActive]}
+            onPress={() => setMode('schid')}
+          >
+            <Text style={[s.tabText, showSchid && s.tabTextActive]}>实验ID</Text>
+          </Pressable>
+        </View>
+      )}
 
-      {mode === 'calendar' ? (
+      {!showSchid ? (
         <>
-          {/* 学期 + 刷新 */}
+          {/* 学期 + 刷新：点学期可在各学期之间切换，选择会被记住 */}
           <View style={s.termBar}>
-            <Text style={s.termText} numberOfLines={1}>
-              {termName ? '学期：' + termName : '加载学期中…'}
-            </Text>
-            <Pressable style={s.refreshBtn} onPress={load} disabled={loading}>
+            <Pressable
+              style={s.termPicker}
+              onPress={() => setTermsOpen(true)}
+              disabled={terms.length === 0}
+            >
+              <Text style={s.termText} numberOfLines={1}>
+                {termName ? '学期：' + termName : '加载学期中…'}
+              </Text>
+              {terms.length > 1 && <Text style={s.termChevron}>切换</Text>}
+            </Pressable>
+            <Pressable style={s.refreshBtn} onPress={reload} disabled={loading}>
               <Text style={s.refreshText}>刷新</Text>
             </Pressable>
           </View>
@@ -335,7 +371,7 @@ export default function PaperDownloadScreen() {
             <View style={s.emptyBox}>
               <Text style={s.emptyTitle}>加载失败</Text>
               <Text style={s.emptyText}>{error}</Text>
-              <Pressable style={s.retryBtn} onPress={load}>
+              <Pressable style={s.retryBtn} onPress={reload}>
                 <Text style={s.retryText}>重试</Text>
               </Pressable>
             </View>
@@ -384,63 +420,60 @@ export default function PaperDownloadScreen() {
                     <Pressable
                       style={[s.dlBtn, busy && s.btnDisabled]}
                       disabled={busy}
-                      onPress={() => {
-                        const title = entry.coursename || entry.title || '作业';
-                        router.push({
-                          pathname: '/paper-preview',
-                          params: {
-                            schid: entry.schid,
-                            kind: 'work',
-                            title,
-                            date: entry.date,
-                            data: JSON.stringify(buildPaperRequestData(entry, { login, userName, univer })),
-                          },
-                        });
-                      }}
+                      onPress={() => goPreview(entry, 'work')}
                     >
                       <Text style={s.dlBtnText}>预览</Text>
                     </Pressable>
-                    <Pressable
-                      style={[s.dlBtnSecondary, busy && s.btnDisabled]}
-                      disabled={busy}
-                      onPress={() => {
-                        const title = entry.coursename || entry.title || '批改';
-                        router.push({
-                          pathname: '/paper-preview',
-                          params: {
-                            schid: entry.schid,
-                            kind: 'workcorr',
-                            title,
-                            date: entry.date,
-                            data: JSON.stringify(buildPaperRequestData(entry, { login, userName, univer })),
-                          },
-                        });
-                      }}
-                    >
-                      <Text style={s.dlBtnSecondaryText}>批改预览</Text>
-                    </Pressable>
-                    <Pressable
-                      style={[s.dlBtnOutline, (busy || downloadingKey === `${entry.schid}-work-html`) && s.btnDisabled]}
-                      disabled={busy}
-                      onPress={() => handleEntryDownload(entry, 'work', 'html')}
-                    >
-                      {downloadingKey === `${entry.schid}-work-html` ? (
-                        <ActivityIndicator size="small" color={colors.textSecondary} />
-                      ) : (
-                        <Text style={s.dlBtnOutlineText}>HTML</Text>
-                      )}
-                    </Pressable>
-                    <Pressable
-                      style={[s.dlBtnOutline2, (busy || downloadingKey === `${entry.schid}-work-json`) && s.btnDisabled]}
-                      disabled={busy}
-                      onPress={() => handleEntryDownload(entry, 'work', 'json')}
-                    >
-                      {downloadingKey === `${entry.schid}-work-json` ? (
-                        <ActivityIndicator size="small" color={colors.textSecondary} />
-                      ) : (
-                        <Text style={s.dlBtnOutlineText}>JSON</Text>
-                      )}
-                    </Pressable>
+                    {/* 批改纸是教师侧功能，学生账号不显示入口 */}
+                    {isTeacher && (
+                      <Pressable
+                        style={[s.dlBtnSecondary, busy && s.btnDisabled]}
+                        disabled={busy}
+                        onPress={() => goPreview(entry, 'workcorr')}
+                      >
+                        <Text style={s.dlBtnSecondaryText}>批改预览</Text>
+                      </Pressable>
+                    )}
+                    {devMode && (
+                      <>
+                        <Pressable
+                          style={[s.dlBtnOutline, (busy || downloadingKey === `${entry.schid}-work-html`) && s.btnDisabled]}
+                          disabled={busy}
+                          onPress={() =>
+                            handleDump(
+                              { tag: entry.coursename || entry.title || '未知', date: entry.date },
+                              buildPaperRequestData(entry, { login, userName, univer }),
+                              'work',
+                              'html',
+                            )
+                          }
+                        >
+                          {downloadingKey === `${entry.schid}-work-html` ? (
+                            <ActivityIndicator size="small" color={colors.textSecondary} />
+                          ) : (
+                            <Text style={s.dlBtnOutlineText}>HTML</Text>
+                          )}
+                        </Pressable>
+                        <Pressable
+                          style={[s.dlBtnOutline2, (busy || downloadingKey === `${entry.schid}-work-json`) && s.btnDisabled]}
+                          disabled={busy}
+                          onPress={() =>
+                            handleDump(
+                              { tag: entry.coursename || entry.title || '未知', date: entry.date },
+                              buildPaperRequestData(entry, { login, userName, univer }),
+                              'work',
+                              'json',
+                            )
+                          }
+                        >
+                          {downloadingKey === `${entry.schid}-work-json` ? (
+                            <ActivityIndicator size="small" color={colors.textSecondary} />
+                          ) : (
+                            <Text style={s.dlBtnOutlineText}>JSON</Text>
+                          )}
+                        </Pressable>
+                      </>
+                    )}
                   </View>
                 </View>
               );
@@ -511,9 +544,9 @@ export default function PaperDownloadScreen() {
             <Pressable
               style={[s.actionBtnOutline, { flex: 1 }, downloadingKey !== null && s.btnDisabled]}
               disabled={downloadingKey !== null}
-              onPress={() => handleSchidDownload('work', 'html')}
+              onPress={() => handleSchidDump('work', 'html')}
             >
-              {downloadingKey === 'schid-work-html' ? (
+              {downloadingKey === `${scheduleId.trim()}-work-html` ? (
                 <ActivityIndicator size="small" color={colors.textSecondary} />
               ) : (
                 <Text style={s.actionBtnOutlineText}>HTML</Text>
@@ -522,12 +555,12 @@ export default function PaperDownloadScreen() {
             <Pressable
               style={[s.actionBtnOutline, { flex: 1 }, downloadingKey !== null && s.btnDisabled]}
               disabled={downloadingKey !== null}
-              onPress={() => handleSchidDownload('workcorr', 'html')}
+              onPress={() => handleSchidDump('workcorr', 'json')}
             >
-              {downloadingKey === 'schid-workcorr-html' ? (
+              {downloadingKey === `${scheduleId.trim()}-workcorr-json` ? (
                 <ActivityIndicator size="small" color={colors.textSecondary} />
               ) : (
-                <Text style={s.actionBtnOutlineText}>批改HTML</Text>
+                <Text style={s.actionBtnOutlineText}>批改JSON</Text>
               )}
             </Pressable>
           </View>
@@ -547,6 +580,40 @@ export default function PaperDownloadScreen() {
           </View>
         </>
       )}
+
+      {/* 学期选择：列出服务器返回的全部学期，点选后重新拉该学期日程 */}
+      <Modal visible={termsOpen} transparent animationType="fade" onRequestClose={() => setTermsOpen(false)}>
+        <Pressable style={s.modalScrim} onPress={() => setTermsOpen(false)}>
+          <View style={s.modalPanel} onStartShouldSetResponder={() => true}>
+            <Text style={s.modalTitle}>选择学期</Text>
+            <FlatList
+              data={terms}
+              keyExtractor={(t) => String(t.id)}
+              style={s.modalList}
+              renderItem={({ item }) => (
+                <Pressable
+                  style={[s.termRow, item.id === termId && s.termRowActive]}
+                  onPress={async () => {
+                    setTermsOpen(false);
+                    if (item.id !== termId) {
+                      locatedFor.current = null;
+                      await setTerm(item.id);
+                    }
+                  }}
+                >
+                  <Text style={[s.termRowText, item.id === termId && s.termRowTextActive]}>
+                    {item.name || item.id}
+                  </Text>
+                  {item.id === termId && <Text style={s.termRowMark}>当前</Text>}
+                </Pressable>
+              )}
+            />
+            <Pressable style={s.modalClose} onPress={() => setTermsOpen(false)}>
+              <Text style={s.modalCloseText}>关闭</Text>
+            </Pressable>
+          </View>
+        </Pressable>
+      </Modal>
     </ScrollView>
   );
 }
@@ -565,9 +632,36 @@ const createStyles = (COLORS: Palette) =>
 
     // 学期栏
     termBar: { flexDirection: 'row', alignItems: 'center', marginBottom: SPACING.sm },
+    termPicker: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingVertical: 4,
+      padding: SPACING.xs,
+    },
     termText: { flex: 1, fontSize: 13, color: COLORS.textSecondary },
+    termChevron: { fontSize: 12, color: COLORS.accent, fontWeight: '600', marginLeft: SPACING.sm },
     refreshBtn: { borderWidth: 1, borderColor: COLORS.accent, paddingHorizontal: SPACING.md, paddingVertical: 4 },
     refreshText: { fontSize: 13, color: COLORS.accent, fontWeight: '600' },
+
+    // 学期选择弹层
+    modalScrim: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'center', padding: SPACING.xl },
+    modalPanel: { backgroundColor: COLORS.bg, borderWidth: 1, borderColor: COLORS.border, padding: SPACING.md, maxHeight: '70%' },
+    modalTitle: { fontSize: 15, fontWeight: '700', color: COLORS.text, marginBottom: SPACING.sm },
+    modalList: { marginBottom: SPACING.sm },
+    termRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingVertical: SPACING.md,
+      borderTopWidth: 1,
+      borderTopColor: COLORS.border,
+    },
+    termRowActive: { backgroundColor: COLORS.bgMuted },
+    termRowText: { flex: 1, fontSize: 14, color: COLORS.text },
+    termRowTextActive: { color: COLORS.accent, fontWeight: '700' },
+    termRowMark: { fontSize: 12, color: COLORS.accent },
+    modalClose: { borderWidth: 1, borderColor: COLORS.border, paddingVertical: SPACING.sm, alignItems: 'center' },
+    modalCloseText: { fontSize: 14, color: COLORS.textSecondary },
 
     // 日历
     calendar: {

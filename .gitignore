@@ -33,5 +33,5 @@ yarn-error.*
 # Native build directories
 android/
 ios/
-# ��ʱ�Ŵ��ļ�
+# 逆向分析脚本与取样数据（本地保留，不入库）
 pc-analysis/

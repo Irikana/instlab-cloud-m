@@ -2,12 +2,21 @@
 // 1. GET /api/token?id=instlab_cloud_wechat&secret=...&seed={rand}  → 种 app token cookie
 // 2. GET /api/captcha  → 返回 SVG 验证码，种 captcha cookie
 // 3. POST /api/login {userid, password, captcha, univer} → 返回 userinfo
+// 会话即服务器种下的 cookie，恢复登录态靠把它持久化并在启动时灌回 cookie 表。
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { deleteToken, getToken, setToken } from '../lib/auth';
-import { saveCookiesFromResponse, cookieHeader, clearCookies } from '../lib/cookies';
+import { clearSession, getSession, setSession } from '../lib/auth';
+import {
+  saveCookiesFromResponse,
+  cookieHeader,
+  clearCookies,
+  restoreCookies,
+  serializeCookies,
+  setCookieListener,
+} from '../lib/cookies';
+import { API_BASE } from '../lib/api';
+import { useTermStore } from './term-store';
 
-const API_BASE = 'https://cloud.instlab.cn';
 const APP_ID = 'instlab_cloud_wechat';
 const APP_SECRET = 'c98068bd35694260ba49f11fee86c0b7';
 
@@ -32,10 +41,12 @@ interface AuthState {
   /** 学号+密码+验证码 登录 */
   loginWithCredentials: (studentId: string, password: string, captcha: string, univer: string) => Promise<void>;
   logout: () => Promise<void>;
+  /** 会话被服务器拒绝时清掉本地登录态并带上说明 */
+  forceLogout: (reason?: string) => Promise<void>;
   clearError: () => void;
 }
 
-export const useAuthStore = create<AuthState>((set) => ({
+export const useAuthStore = create<AuthState>((set, get) => ({
   isAuthenticated: null,
   login: null,
   userName: null,
@@ -47,11 +58,21 @@ export const useAuthStore = create<AuthState>((set) => ({
   captchaSvg: null,
 
   init: async () => {
-    const token = await getToken();
-    if (!token) {
+    const session = await getSession();
+    if (!session) {
       set({ isAuthenticated: false });
       return;
     }
+    // 把上次的会话 cookie 灌回内存表，否则所有请求都会以匿名身份发出
+    restoreCookies(session);
+    if (!cookieHeader()) {
+      set({ isAuthenticated: false });
+      return;
+    }
+    // 服务器刷新过的 cookie 也一并存回去
+    setCookieListener((serialized) => {
+      void setSession(serialized);
+    });
     // 从缓存恢复用户信息（姓名/角色/学号/学校），避免重进丢失
     try {
       const raw = await AsyncStorage.getItem(USERINFO_KEY);
@@ -134,9 +155,13 @@ export const useAuthStore = create<AuthState>((set) => ({
       const realRole = userinfo.role !== undefined ? String(userinfo.role) : '';
       const isTeacher = !!(userinfo.IsTeacher || userinfo.IsSchoolAdmin || userinfo.IsUniversityAdmin || userinfo.IsCourseAdmin);
 
-      // 保存 token（用 userinfo 或 cookie 中的 token 字段）
-      const token = cookieHeader() || String(userinfo.id || '');
-      await setToken(token);
+      // 会话就是服务器种下的 cookie；存下来并在冷启动时灌回
+      const session = cookieHeader();
+      if (!session) throw new Error('登录异常：服务器没有返回会话 cookie');
+      await setSession(session);
+      setCookieListener((serialized) => {
+        void setSession(serialized);
+      });
       const profile = {
         login: studentId,
         userName: realName || studentId,
@@ -163,8 +188,10 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   logout: async () => {
-    await deleteToken();
+    setCookieListener(null);
+    await clearSession();
     clearCookies();
+    useTermStore.getState().reset();
     try {
       await AsyncStorage.removeItem(USERINFO_KEY);
     } catch {
@@ -180,6 +207,13 @@ export const useAuthStore = create<AuthState>((set) => ({
       error: null,
       captchaSvg: null,
     });
+  },
+
+  /** 请求带回 401/403：本地会话已失效，清干净并回到登录页，别让用户对着空列表猜 */
+  forceLogout: async (reason?: string) => {
+    const message = reason ?? '登录已失效，请重新登录';
+    await get().logout();
+    set({ error: message });
   },
 
   clearError: () => set({ error: null }),
