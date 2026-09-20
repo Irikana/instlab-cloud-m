@@ -100,7 +100,7 @@ export function paperIdOf(payload: PaperPayload, fallback: Record<string, unknow
 
 /**
  * 作业纸导出文件名，与电脑版保持一致：
- * 课程作业纸_量子力学_2440810032_韦仁杰_2026年9月8日_(星期二).pdf
+ * 课程作业纸_量子力学_20010000001_李四_2026年9月8日_(星期二).pdf
  * 日期用「YYYY年M月D日_(星期X)」而不是压缩成 8 位数字（此前手机端与电脑版不一致）。
  */
 export function paperFileName(
