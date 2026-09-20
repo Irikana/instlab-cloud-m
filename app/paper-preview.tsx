@@ -25,8 +25,11 @@ import {
   exportDocPdf,
   fetchPaper,
   geometryForPayload,
+  paperFileName,
+  paperIdOf,
   printPageSize,
   readPaginateMessage,
+  withFlatHeader,
   type PaperKind,
   type PaperRenderOptions,
 } from '../src/lib/paper';
@@ -66,6 +69,8 @@ export default function PaperPreviewScreen() {
   const [pageCount, setPageCount] = useState(0);
   /** 降级说明：分页没做成时告诉用户当前是连续文档，不挡在加载页前面 */
   const [notice, setNotice] = useState<string | null>(null);
+  /** 作业 ID 取自哪个字段，显示出来便于和电脑版核对 */
+  const [idSource, setIdSource] = useState('');
 
   // 加载作业纸
   useEffect(() => {
@@ -86,13 +91,15 @@ export default function PaperPreviewScreen() {
     setOpts(null);
     setPageCount(0);
     setNotice(null);
+    setIdSource('');
     try {
       const payload = await fetchPaper(kind, requestData);
       const html = payload.html ?? '';
       if (!html) throw new Error('服务器未返回 HTML 模板');
       const renderData = { ...requestData, ...(payload.data ?? {}) };
-      // PC 条码内容使用服务器返回的 data.id（作业记录 ID），前缀使用 filetypeid
-      const paperId = String(payload.data?.id ?? requestData.id ?? '').replace(/\D/g, '');
+      // PC 条码内容使用服务器返回的作业记录 ID，前缀使用 filetypeid
+      const { id: paperId, from: idFrom } = paperIdOf(payload, requestData);
+      setIdSource(paperId ? idFrom : '');
       const built: PaperRenderOptions = {
         geometry: geometryForPayload(payload),
         barcodePrefix: barcodePrefixFor(payload, kind),
@@ -104,7 +111,7 @@ export default function PaperPreviewScreen() {
       setBaseDoc(doc);
       // 拿不到作业 ID 就没有身份条码，按未分页文档直接展示/打印
       if (!paperId) {
-        setPrintDoc(doc);
+        setPrintDoc(withFlatHeader(doc, built));
         setMeasured(true);
         setNotice('服务器未返回作业 ID，本机不生成逐页身份条码；正式提交扫描作业请使用电脑端。');
       }
@@ -124,7 +131,7 @@ export default function PaperPreviewScreen() {
     const msg = readPaginateMessage(event.nativeEvent.data ?? '');
     if (msg.kind === 'ignore') return;
     if (msg.kind === 'error') {
-      if (baseDoc) setPrintDoc(baseDoc);
+      if (baseDoc && opts) setPrintDoc(withFlatHeader(baseDoc, opts));
       setMeasured(true);
       setNotice('自动分页未完成（' + msg.message + '），当前为连续文档，页数由打印机自行决定。');
       return;
@@ -179,7 +186,9 @@ export default function PaperPreviewScreen() {
     if (!printDoc || !opts) return;
     setProcessing(true);
     try {
-      const res = await exportDocPdf(printDoc, opts.geometry, `${displayTitle || '作业纸'}.pdf`);
+      const datePart = String(requestData.sch_date ?? requestData.paper_datestring ?? '');
+      const fileName = paperFileName(kind, displayTitle, String(requestData.userid ?? ''), String(requestData.studentname ?? ''), datePart, 'pdf');
+      const res = await exportDocPdf(printDoc, opts.geometry, fileName);
       if (!res.shared) Alert.alert('PDF 已生成', res.uri);
     } catch (e) {
       Alert.alert('下载失败', (e as Error).message);
@@ -285,6 +294,7 @@ export default function PaperPreviewScreen() {
           </View>
           <Text style={s.toolbarMeta}>
             {pageCount > 0 ? pageCount + ' 页' : '未分页'}
+            {idSource ? ' · 作业ID 取自 ' + idSource : ''}
             {opts.geometry.explicit
               ? ` · 版心 ${Math.round(opts.geometry.contentWidthMm)}×${Math.round(opts.geometry.contentHeightMm)}mm（取自服务器参数）`
               : ' · 服务器未给页面参数，版心按 A4 / 10mm 边距'}

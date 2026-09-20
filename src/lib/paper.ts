@@ -74,6 +74,56 @@ export function barcodePrefixFor(payload: PaperPayload, kind: PaperKind): string
   return kind === 'work' ? '08' : '82';
 }
 
+/**
+ * 身份条码里的作业 ID。
+ * 实测电脑版条码为 0801000011740 → 作业 ID 是 11740（补零到 9 位），与 schid/planid/expid 无关。
+ * 服务器把这个值放在哪个字段并没有文档可查，因此按几个常见写法找第一个纯数字字段，
+ * 并把命中的字段名回传给界面显示——对不上时能一眼看出是没这个字段还是取错了键。
+ */
+const PAPER_ID_KEYS = ['id', 'paperid', 'paper_id', 'workpaperid', 'wpid', 'pid'];
+
+export function paperIdOf(payload: PaperPayload, fallback: Record<string, unknown> = {}): { id: string; from: string } {
+  const sources: Array<[string, Record<string, unknown>]> = [
+    ['data', (payload.data ?? {}) as Record<string, unknown>],
+    ['request', fallback],
+  ];
+  for (const [where, src] of sources) {
+    for (const key of PAPER_ID_KEYS) {
+      const v = src[key];
+      if (v === undefined || v === null) continue;
+      const digits = String(v).replace(/\D/g, '');
+      if (digits && digits === String(v).trim()) return { id: digits, from: `${where}.${key}` };
+    }
+  }
+  return { id: '', from: '' };
+}
+
+/**
+ * 作业纸导出文件名，与电脑版保持一致：
+ * 课程作业纸_量子力学_2440810032_韦仁杰_2026年9月8日_(星期二).pdf
+ * 日期用「YYYY年M月D日_(星期X)」而不是压缩成 8 位数字（此前手机端与电脑版不一致）。
+ */
+export function paperFileName(
+  kind: PaperKind,
+  courseName: string,
+  login: string,
+  userName: string,
+  dateString: string,
+  ext: string,
+): string {
+  const label = kind === 'work' ? '课程作业纸' : '批改作业纸';
+  const clean = (s: string) => String(s ?? '').replace(/[\\/:*?"<>|]/g, '_').trim();
+  const d = String(dateString ?? '').match(/(\d{4})[/\-.](\d{1,2})[/\-.](\d{1,2})/);
+  let datePart = clean(dateString);
+  if (d) {
+    const dt = new Date(Number(d[1]), Number(d[2]) - 1, Number(d[3]));
+    datePart = isNaN(dt.getTime())
+      ? `${d[1]}年${Number(d[2])}月${Number(d[3])}日`
+      : `${dt.getFullYear()}年${dt.getMonth() + 1}月${dt.getDate()}日_(星期${WEEK_CN[dt.getDay()]})`;
+  }
+  return `${label}_${clean(courseName)}_${clean(login)}_${clean(userName)}_${datePart}.${ext}`;
+}
+
 /** 页面顶部身份条码的内容：前缀 + 两位页码 + 补零到 9 位的作业 ID */
 export function paperBarcodeValue(prefix: string, paperId: string | number, page: number): string {
   const id = String(paperId ?? '').replace(/\D/g, '');
@@ -110,17 +160,6 @@ export function buildBaseDocument(
   opts: PaperRenderOptions,
 ): string {
   let out = html;
-
-  if (opts.titlelogo) {
-    const image = opts.titlelogo.startsWith('data:')
-      ? opts.titlelogo
-      : `data:image/png;base64,${opts.titlelogo}`;
-    const banner =
-      `<div style="width:100%;margin:0;padding:0;text-align:left">` +
-      `<img src="${image}" style="width:60.8mm;height:18.5mm;display:block" /></div>` +
-      `<div style="height:5mm"></div>`;
-    out = out.replace(/<body[^>]*>/i, (m) => `${m}\n${banner}`);
-  }
 
   out = out.replace(/<\/head>/i, `${injectedStyles(opts.geometry)}</head>`);
 
@@ -167,9 +206,21 @@ const CODE128_BITS = [
   10111101110, 11101011110, 11110101110, 11010000100, 11010010000, 11010011100, 1100011101011,
 ];
 
-/** 条码在纸面上的物理尺寸：宽 65mm、高 30pt（iText Barcode128 的默认条高） */
+/**
+ * 条码在纸面上的物理尺寸——直接量自电脑版生成的 PDF：
+ * iText 生成的 Form XObject BBox 98.4x32.6pt，放到页面上时矩阵缩放 1.87，
+ * 于是渲染成 65.0x21.5mm；其中竖条在表单内占 y 6.6..32.6（26pt 高 ×1.87 = 17.15mm），
+ * 说明文字在竖条下方，字号 5pt ×1.87 = 9.35pt。
+ */
 const BARCODE_WIDTH_MM = 65;
-const BARCODE_HEIGHT_MM = 10.6;
+const BARCODE_HEIGHT_MM = 21.5;
+const BARCODE_BARS_MM = 17.15;
+const BARCODE_CAPTION_PT = 9.35;
+
+/** 页眉带：抬头图与条码都落在页边距带里（实测距页顶 15mm，而正文从 30mm 起排） */
+function bandTopMm(g: PaperGeometry): number {
+  return g.marginTopMm / 2;
+}
 
 /** 码值序列 → 模块总数（供注入脚本与 TS 侧共用同一份宽度算法） */
 function code128Modules(codes: number[]): number {
@@ -194,7 +245,7 @@ function code128Rects(codes: number[]): string {
 /**
  * 身份条码 SVG。
  * 条宽用 viewBox 里的 1 模块表示，再由 width/height 一次性缩放到纸面尺寸，
- * 这样每条模块严格等宽；若按像素画会因 65mm 除不尽模块数而出现粗细不均。
+ * 这样每条模块严格等宽；若按像素画会因 65mm 除不尽 123 模块而出现粗细不均。
  */
 function barcodeSvg(value: string): string {
   const codes = code128cCodes(value);
@@ -202,7 +253,7 @@ function barcodeSvg(value: string): string {
   const modules = code128Modules(codes);
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${modules} 34" ` +
-    `width="${BARCODE_WIDTH_MM}mm" height="${BARCODE_HEIGHT_MM}mm" preserveAspectRatio="none">` +
+    `width="${BARCODE_WIDTH_MM}mm" height="${BARCODE_BARS_MM}mm" preserveAspectRatio="none">` +
     `<g fill="#000" height="34">${code128Rects(codes)}</g></svg>`
   );
 }
@@ -230,18 +281,144 @@ function code128cCodes(value: string): number[] {
 }
 
 /** 一页右上角的身份条码（条码 + 下方可读文本） */
+/**
+ * 未分页文档（拿不到作业 ID 或分页脚本失败）的抬头处理：
+ * 用 position:fixed 让抬头图压在每页同位置，不参与正文排版。
+ * 已分页的文档走 assemblePaginatedDoc 的逐页盖章，不使用本函数。
+ */
+export function withFlatHeader(doc: string, opts: PaperRenderOptions): string {
+  const logo = logoHtml(opts);
+  if (!logo) return doc;
+  return doc.replace(/<\/body>/i, `<div style="position:fixed;top:0;left:0;width:${opts.geometry.pageWidthMm}mm;height:${opts.geometry.pageHeightMm}mm;pointer-events:none;">${logo}</div></body>`);
+}
+
+/**
+ * 每页左上角的抬头图。
+ * 实测电脑版：图片 60.8x18.5mm，左边 15mm、距页顶 15mm——落在上边距带里，
+ * 不参与正文排版（正文仍从 30mm 起）。手机端必须同样绝对定位，
+ * 否则会把整页正文往下顶 18.5mm，和电脑版错开一整条。
+ */
+function logoHtml(opts: PaperRenderOptions): string {
+  if (!opts.titlelogo) return '';
+  const image = opts.titlelogo.startsWith('data:')
+    ? opts.titlelogo
+    : `data:image/png;base64,${opts.titlelogo}`;
+  const g = opts.geometry;
+  return (
+    `<div class="icm-logo" style="position:absolute;top:${bandTopMm(g)}mm;left:${g.marginLeftMm}mm;` +
+    `width:60.8mm;height:18.5mm;z-index:5;">` +
+    `<img src="${image}" style="width:60.8mm;height:18.5mm;display:block" /></div>`
+  );
+}
+
+/** 一页右上角的身份条码：竖条在上、可读数字在下，与电脑版 iText 的排布一致 */
 function barcodeHtml(value: string, g: PaperGeometry): string {
   if (!value) return '';
   return (
-    `<div style="position:absolute;top:${g.marginTopMm / 3}mm;right:${g.marginRightMm}mm;` +
-    `width:${BARCODE_WIDTH_MM}mm;text-align:center;z-index:5;">` +
+    `<div class="paper-barcode" style="position:absolute;top:${bandTopMm(g)}mm;right:${g.marginRightMm}mm;` +
+    `width:${BARCODE_WIDTH_MM}mm;height:${BARCODE_HEIGHT_MM}mm;text-align:right;z-index:5;overflow:hidden;">` +
     barcodeSvg(value) +
-    `<div style="font-size:7pt;letter-spacing:0.4mm;margin-top:0.5mm;font-family:monospace;">${value}</div>` +
+    `<div style="font-size:${BARCODE_CAPTION_PT}pt;line-height:1;text-align:right;font-family:sans-serif;">${value}</div>` +
     `</div>`
   );
 }
 
 // ========== 分页 ==========
+
+/**
+ * 可分页单元。
+ * h        = 高度（CSS px）
+ * html     = 该单元的完整 HTML
+ * kids     = 可再拆的子单元
+ * wrap     = 用同样的外层标签把一段子块包回来
+ * shellId  = 同属一个父元素的片段共享的编号，用于把相邻片段并回一个外壳
+ */
+export interface PackUnit {
+  h: number;
+  html: string;
+  kids?: PackUnit[];
+  wrap?: (inner: string) => string;
+  shellId?: number;
+}
+
+/**
+ * 把版面单元摊平成"一页装得下"的片段序列。
+ * 电脑版的出图引擎是按行连续断页的，手机端此前只在顶层块之间断，
+ * 一道大题装不进剩余空间时整块挪到下一页，页底就会留出一大段空白、
+ * 分页落点与电脑版对不上。这里允许往下拆一层，并用同样的外层标签
+ * 把片段包回来（表格的边框、单元格样式才不会丢）。
+ * 子单元撑不满一页或只有一个子块时不拆，避免把不该分的东西切开。
+ */
+export function flattenUnits(units: PackUnit[], pageH: number): PackUnit[] {
+  const out: PackUnit[] = [];
+  for (const item of units) {
+    const kids = item.kids ?? [];
+    if (item.h <= pageH || kids.length < 2 || !item.wrap) {
+      out.push({ h: item.h, html: item.html });
+      continue;
+    }
+    for (const frag of flattenUnits(kids, pageH)) {
+      out.push({
+        h: frag.h,
+        html: frag.html,
+        wrap: item.wrap,
+        shellId: item.shellId,
+      });
+    }
+  }
+  return out;
+}
+
+/** 贪婪装页：一块一页放不下就另起一页；单块超过一页时独占一页（与引擎行为一致） */
+export function packUnitsToPages(units: PackUnit[], pageH: number): PackUnit[][] {
+  const pages: PackUnit[][] = [];
+  let cur: PackUnit[] = [];
+  let used = 0;
+  for (const item of units) {
+    if (cur.length > 0 && used + item.h > pageH) {
+      pages.push(cur);
+      cur = [];
+      used = 0;
+    }
+    cur.push(item);
+    used += item.h;
+  }
+  if (cur.length > 0 || pages.length === 0) pages.push(cur);
+  return pages;
+}
+
+/**
+ * 把一页里的片段拼成 HTML。
+ * 来自同一个父元素（同一张表格）的相邻片段必须并回同一个外壳：
+ * 一人包一个 <table> 会画成两张表，单元格边框与行距就和电脑版对不上了。
+ */
+export function renderPageUnits(units: PackUnit[]): string {
+  let out = '';
+  let buf = '';
+  let shellId = -2;
+  let shellWrap: ((inner: string) => string) | null = null;
+  const flush = () => {
+    if (!buf) return;
+    out += shellWrap ? shellWrap(buf) : buf;
+    buf = '';
+  };
+  for (const u of units) {
+    const id = u.wrap ? (u.shellId ?? -1) : -2;
+    if (id !== shellId) {
+      flush();
+      shellId = id;
+      shellWrap = u.wrap ?? null;
+    }
+    buf += u.html;
+  }
+  flush();
+  return out;
+}
+
+/** 把 PackUnit 序列摊平+装页，直接返回每页的 innerHTML 数组 */
+export function paginateUnits(units: PackUnit[], pageH: number): string[] {
+  return packUnitsToPages(flattenUnits(units, pageH), pageH).map(renderPageUnits);
+}
 
 /**
  * 测量 WebView 里执行的脚本：按 h2pargs 给出的版心把正文切成一页一页，
@@ -254,41 +431,56 @@ export function buildPaginateScript(opts: PaperRenderOptions): string {
   try {
     var CONTENT_PX = ${g.contentHeightPx};
     var PADDING = ${JSON.stringify(contentPaddingCss(g))};
+    // 摊平与装页的算法与手机端共用同一份实现（导出函数按名注入，paginateUnits 内部按名调用前两个）
+    var flattenUnits = ${flattenUnits.toString()};
+    var packUnitsToPages = ${packUnitsToPages.toString()};
+    var renderPageUnits = ${renderPageUnits.toString()};
+    var paginateUnits = ${paginateUnits.toString()};
 
     function measure() {
       var body = document.body;
       if (!body) throw new Error('文档没有 body');
-      // 测量时必须带着页边距一起排版：正文实际可用宽是版心宽（如 180mm），
-      // 按整页宽（210mm）量出来的行数和高度会比打印出来少一截。
+      // 测量时必须带着页边距一起排版：正文实际可用宽是版心宽（电脑版实测 679 CSS px ≈ 180mm），
+      // 按整页宽（210mm）量出来的行数会比打印出来少一截。
       // PADDING 里带 width:100%，所以整页宽度要在它之后再压一次。
       body.style.cssText = 'margin:0;box-sizing:border-box;transform:none;' + PADDING + 'width:${g.pageWidthMm}mm;';
 
-      var blocks = [];
+      var units = [];
+      var SKIP = { script: 1, style: 1, link: 1, meta: 1 };
+      var shellSeq = 0;
+      function toUnit(el) {
+        var r = el.getBoundingClientRect();
+        var kids = [];
+        for (var i = 0; i < el.children.length; i++) {
+          var c = el.children[i];
+          var t = c.tagName.toLowerCase();
+          if (SKIP[t]) continue;
+          var k = toUnit(c);
+          if (k.h > 0.5) kids.push(k);
+        }
+        var shellId = kids.length > 1 ? ++shellSeq : undefined;
+        return {
+          h: r ? r.height : 0,
+          html: el.outerHTML,
+          kids: kids,
+          shellId: shellId,
+          wrap: function (inner) {
+            var shell = el.cloneNode(false);
+            shell.innerHTML = inner;
+            return shell.outerHTML;
+          }
+        };
+      }
       for (var ci = 0; ci < body.children.length; ci++) {
         var el = body.children[ci];
-        var tag = el.tagName.toLowerCase();
-        if (tag === 'script' || tag === 'style' || tag === 'link') continue;
-        var r = el.getBoundingClientRect();
-        if (!r || r.height < 0.5) continue;
-        blocks.push({ el: el, h: r.height });
+        if (SKIP[el.tagName.toLowerCase()]) continue;
+        var u = toUnit(el);
+        if (u.h > 0.5) units.push(u);
       }
-
-      var pages = [[]], cur = 0;
-      for (var bi = 0; bi < blocks.length; bi++) {
-        var h = blocks[bi].h;
-        var used = 0;
-        for (var si = 0; si < pages[cur].length; si++) used += pages[cur][si].h;
-        if (pages[cur].length > 0 && used + h > CONTENT_PX) { pages.push([]); cur++; }
-        pages[cur].push(blocks[bi]);
-      }
-
-      var out = [];
-      for (var pi = 0; pi < pages.length; pi++) {
-        var inner = '';
-        for (var pj = 0; pj < pages[pi].length; pj++) inner += pages[pi][pj].el.outerHTML;
-        out.push('<div style="' + PADDING + '">' + inner + '</div>');
-      }
-      var msg = JSON.stringify({ icm: 'pages', pages: out });
+      var out = paginateUnits(units, CONTENT_PX);
+      var wrapped = [];
+      for (var pi = 0; pi < out.length; pi++) wrapped.push('<div style="' + PADDING + '">' + out[pi] + '</div>');
+      var msg = JSON.stringify({ icm: 'pages', pages: wrapped });
       if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) window.ReactNativeWebView.postMessage(msg);
       else if (window.parent && window.parent.postMessage) window.parent.postMessage(msg, '*');
     }
@@ -332,6 +524,7 @@ export function assemblePaginatedDoc(
       `<div class="paper-page" style="width:${g.pageWidthMm}mm;height:${g.pageHeightMm}mm;position:relative;margin:0;padding:0;box-sizing:border-box;overflow:hidden;` +
       (i === pages.length - 1 ? '' : 'page-break-after:always;') + `">` +
       renderEdgeHtml(g, 'header', i + 1, total) +
+      logoHtml(opts) +
       pages[i] +
       renderEdgeHtml(g, 'footer', i + 1, total) +
       barcodeHtml(code, g) +

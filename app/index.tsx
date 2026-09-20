@@ -48,9 +48,9 @@ export default function HomeScreen() {
     },
     {
       title: '课程表',
-      desc: '查看实验课程安排与教学计划',
+      desc: '按星期查看所选学期的实验与理论课安排',
       href: '/schedule',
-      enabled: false,
+      enabled: true,
     },
     {
       title: '实验报告',

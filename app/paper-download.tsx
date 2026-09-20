@@ -32,6 +32,7 @@ import {
   downloadRawHtml,
   downloadRawJson,
   fetchPaper,
+  paperFileName,
   type PaperKind,
 } from '../src/lib/paper';
 import { isUnauthorized } from '../src/lib/api';
@@ -208,23 +209,21 @@ export default function PaperDownloadScreen() {
     });
   };
 
-  const dumpFileName = (kind: PaperKind, tag: string, date: string, fmt: string) => {
-    const label = kind === 'work' ? '课程作业纸' : '批改作业纸';
-    return `${label}_${tag}_${(login || '').replace(/[\\/:*?"<>|]/g, '_')}_${(userName || '').replace(/[\\/:*?"<>|]/g, '_')}_${date.replace(/-/g, '')}.${fmt}`;
-  };
+  const dumpFileName = (kind: PaperKind, courseName: string, date: string, fmt: string) =>
+    paperFileName(kind, courseName, login || '', userName || '', date, fmt);
 
   /** 导出服务器原样返回的 HTML / JSON，用于与电脑版对照排查（开发者模式可见） */
   const handleDump = async (
-    source: { tag: string; date: string },
+    source: { key: string; courseName: string; date: string },
     schData: Record<string, unknown>,
     kind: PaperKind,
     fmt: 'html' | 'json',
   ) => {
-    const key = `${source.tag}-${kind}-${fmt}`;
+    const key = `${source.key}-${kind}-${fmt}`;
     setDownloadingKey(key);
     try {
       const payload = await fetchPaper(kind, schData);
-      const fileName = dumpFileName(kind, source.tag, source.date, fmt);
+      const fileName = dumpFileName(kind, source.courseName, source.date, fmt);
       const res = fmt === 'html'
         ? await downloadRawHtml(payload, fileName)
         : await downloadRawJson(payload, fileName);
@@ -248,7 +247,7 @@ export default function PaperDownloadScreen() {
       Alert.alert('提示', '请输入实验安排ID（schid）');
       return;
     }
-    await handleDump({ tag: id, date: todayStr() }, { schid: id }, kind, fmt);
+    await handleDump({ key: id, courseName: '作业纸', date: todayStr() }, { schid: id }, kind, fmt);
   };
 
   const selectedDateLabel = (() => {
@@ -441,7 +440,7 @@ export default function PaperDownloadScreen() {
                           disabled={busy}
                           onPress={() =>
                             handleDump(
-                              { tag: entry.coursename || entry.title || '未知', date: entry.date },
+                              { key: entry.schid, courseName: entry.coursename || entry.title || '未知', date: entry.date },
                               buildPaperRequestData(entry, { login, userName, univer }),
                               'work',
                               'html',
@@ -459,7 +458,7 @@ export default function PaperDownloadScreen() {
                           disabled={busy}
                           onPress={() =>
                             handleDump(
-                              { tag: entry.coursename || entry.title || '未知', date: entry.date },
+                              { key: entry.schid, courseName: entry.coursename || entry.title || '未知', date: entry.date },
                               buildPaperRequestData(entry, { login, userName, univer }),
                               'work',
                               'json',

@@ -110,46 +110,79 @@ jobs:
         env:
           INPUT_TAG: ${{ github.event.inputs.tag }}
         run: |
+          set -euo pipefail
+          # 三种触发方式都要能走到这里：
+          #   tag 推送   → 用 tag 本身，且允许覆盖已有 Release 的附件
+          #   手动触发   → 用填进去的 tag（补发历史版本时唯一的路，因为 tag 指向的
+          #                提交里带的还是旧 workflow 文件）
+          #   推送到 main → 按 package.json 的版本号推定 vA.B.C：作者用 GitHub Desktop
+          #                点 Push 只推分支、不会带上 tag，所以这里也负责把正式版发出去；
+          #                已经发过的版本不再覆盖，测试构建因此不会被误当成正式版。
           case "$GITHUB_REF" in
-            refs/tags/*) t="${GITHUB_REF#refs/tags/}" ;;
-            *) t="${INPUT_TAG:-}" ;;
+            refs/tags/*)
+              t="${GITHUB_REF#refs/tags/}"; clobber=yes ;;
+            *)
+              if [ -n "${INPUT_TAG:-}" ]; then
+                t="$INPUT_TAG"; clobber=yes
+              else
+                t="v$(node -p "require('./package.json').version")"; clobber=no
+              fi ;;
           esac
           echo "tag=$t" >> "$GITHUB_OUTPUT"
-          if [ -n "$t" ]; then
-            echo "本次构建将发布 Release: $t"
+          echo "clobber=$clobber" >> "$GITHUB_OUTPUT"
+          echo "本次构建对应的发布目标: $t（覆盖已有 Release 附件: $clobber）"
+
+      - name: Check existing release
+        id: exists
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "yes=1" >> "$GITHUB_OUTPUT"
           else
-            echo "非 tag 构建：只上传 artifact，不创建 Release"
+            echo "yes=0" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Pick release notes
         id: notes
-        if: steps.release.outputs.tag != ''
         env:
           TAG: ${{ steps.release.outputs.tag }}
         run: echo "file=changelog/CHANGELOG-${TAG#v}.md" >> "$GITHUB_OUTPUT"
 
       - name: Publish GitHub Release
-        if: steps.release.outputs.tag != ''
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ steps.release.outputs.tag }}
           NOTES_FILE: ${{ steps.notes.outputs.file }}
           APK: android/app/build/outputs/apk/release/app-release.apk
+          CLOBBER: ${{ steps.release.outputs.clobber }}
+          EXISTS: ${{ steps.exists.outputs.yes }}
         run: |
           # 判据是「有没有 Release」，不是「有没有 tag」——按 tag 判会恰好反过来：
           # 正式版总是先推 tag 再构建，于是每次都跳过发布，产物只留在 artifact 里。
+          if [ "$EXISTS" = "1" ]; then
+            if [ "$CLOBBER" = "yes" ]; then
+              echo "Release $TAG 已存在，覆盖其安装包附件"
+              gh release upload "$TAG" "$APK" --clobber --repo "$GITHUB_REPOSITORY"
+            else
+              echo "Release $TAG 已发布过，本次是分支构建，不动它"
+            fi
+            exit 0
+          fi
           if [ -f "$NOTES_FILE" ]; then
             NOTES_ARGS=(--notes-file "$NOTES_FILE")
           else
             NOTES_ARGS=(--notes "APK 自动构建发布。")
             echo "未找到 $NOTES_FILE，改用默认说明"
           fi
-          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "Release $TAG 已存在，覆盖其安装包附件"
-            gh release upload "$TAG" "$APK" --clobber --repo "$GITHUB_REPOSITORY"
-          else
+          # --verify-tag 要求 tag 已在远端；分支构建推定的版本号若还没打 tag，
+          # 就退回不带该参数创建（gh 会顺手把 tag 建在该提交上）。
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
             gh release create "$TAG" --verify-tag \
-              --title "INSTLAB CLOUD M $TAG" \
-              "${NOTES_ARGS[@]}" "$APK" \
-              --repo "$GITHUB_REPOSITORY"
+              --title "INSTLAB CLOUD M $TAG" "${NOTES_ARGS[@]}" "$APK" --repo "$GITHUB_REPOSITORY"
+          else
+            echo "远端还没有 $TAG，Release 创建时一并补上"
+            gh release create "$TAG" \
+              --title "INSTLAB CLOUD M $TAG" "${NOTES_ARGS[@]}" "$APK" --repo "$GITHUB_REPOSITORY"
           fi
