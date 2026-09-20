@@ -2,8 +2,16 @@ name: Build APK
 
 on:
   workflow_dispatch:
+    inputs:
+      tag:
+        description: '要发布为 Release 的 tag（如 v0.0.10）；留空则只构建测试包'
+        required: false
+        default: ''
   push:
     branches: [main, master]
+    # 正式发版看 tag：作者用 GitHub Desktop 只推分支不会带上 tag，
+    # 补推 vA.B.C 才会走到下面创建 Release 的分支。
+    tags: ['v*']
 
 jobs:
   build:
@@ -64,26 +72,62 @@ jobs:
             exit 1
           fi
 
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: instlab-cloud-m-${{ github.ref_name }}-release
-          path: android/app/build/outputs/apk/release/app-release.apk
-          retention-days: 30
-
       - name: Read version
         id: version
         run: echo "ver=v$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
 
-      - name: Create GitHub Release (skip if tag exists)
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: instlab-cloud-m-${{ steps.version.outputs.ver }}-${{ github.ref_name }}
+          path: android/app/build/outputs/apk/release/app-release.apk
+          retention-days: 30
+
+      - name: Resolve release tag
+        id: release
         env:
-          GH_TOKEN: ${{ github.token }}
+          INPUT_TAG: ${{ github.event.inputs.tag }}
         run: |
-          if gh api "repos/${{ github.repository }}/git/ref/tags/${{ steps.version.outputs.ver }}" >/dev/null 2>&1; then
-            echo "tag ${{ steps.version.outputs.ver }} 已存在，跳过 Release 创建"
+          case "$GITHUB_REF" in
+            refs/tags/*) t="${GITHUB_REF#refs/tags/}" ;;
+            *) t="${INPUT_TAG:-}" ;;
+          esac
+          echo "tag=$t" >> "$GITHUB_OUTPUT"
+          if [ -n "$t" ]; then
+            echo "本次构建将发布 Release: $t"
           else
-            gh release create "${{ steps.version.outputs.ver }}" \
-              android/app/build/outputs/apk/release/app-release.apk \
-              --title "INSTLAB CLOUD M ${{ steps.version.outputs.ver }}" \
-              --notes "APK 自动构建发布。"
+            echo "非 tag 构建：只上传 artifact，不创建 Release"
+          fi
+
+      - name: Pick release notes
+        id: notes
+        if: steps.release.outputs.tag != ''
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+        run: echo "file=changelog/CHANGELOG-${TAG#v}.md" >> "$GITHUB_OUTPUT"
+
+      - name: Publish GitHub Release
+        if: steps.release.outputs.tag != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.release.outputs.tag }}
+          NOTES_FILE: ${{ steps.notes.outputs.file }}
+          APK: android/app/build/outputs/apk/release/app-release.apk
+        run: |
+          # 判据是「有没有 Release」，不是「有没有 tag」——按 tag 判会恰好反过来：
+          # 正式版总是先推 tag 再构建，于是每次都跳过发布，产物只留在 artifact 里。
+          if [ -f "$NOTES_FILE" ]; then
+            NOTES_ARGS=(--notes-file "$NOTES_FILE")
+          else
+            NOTES_ARGS=(--notes "APK 自动构建发布。")
+            echo "未找到 $NOTES_FILE，改用默认说明"
+          fi
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $TAG 已存在，覆盖其安装包附件"
+            gh release upload "$TAG" "$APK" --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$TAG" --verify-tag \
+              --title "INSTLAB CLOUD M $TAG" \
+              "${NOTES_ARGS[@]}" "$APK" \
+              --repo "$GITHUB_REPOSITORY"
           fi
