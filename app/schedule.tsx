@@ -6,11 +6,11 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '../src/store/auth-store';
 import { useTermStore } from '../src/store/term-store';
-import { fetchScheduleEntries, kindLabel, WEEK_LABELS, type ScheduleEntry } from '../src/lib/schedule';
+import { fetchScheduleEntries, kindLabel, termStartDate, weeksLabel, WEEK_LABELS, type ScheduleEntry } from '../src/lib/schedule';
 import { isUnauthorized } from '../src/lib/api';
 import { CALENDAR_COLORS, SPACING, useTheme, type Palette } from '../src/theme';
 
-/** 一条课程表行：同一星期里同课程同节次同地点的合并成一条 */
+/** 一条课程表行：同一星期里同课程同节次同地点的合并成一条，并汇总它跨越的周次 */
 interface Slot {
   key: string;
   title: string;
@@ -19,6 +19,7 @@ interface Slot {
   place: string;
   teacher: string;
   kind: string;
+  weeks: number[];
 }
 
 function weekdayOf(date: string): number {
@@ -49,7 +50,8 @@ export default function ScheduleScreen() {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    fetchScheduleEntries(termId)
+    const term = terms.find((t) => t.id === termId);
+    fetchScheduleEntries(termId, term ? termStartDate(term) : null)
       .then((list) => {
         if (!cancelled) setEntries(list);
       })
@@ -67,11 +69,11 @@ export default function ScheduleScreen() {
     return () => {
       cancelled = true;
     };
-  }, [termId, forceLogout]);
+  }, [termId, terms, forceLogout]);
 
   const termName = terms.find((t) => t.id === termId)?.name ?? '';
 
-  // 同一门课每周重复出现，按「星期几 + 课程 + 节次 + 地点」去重后只列一条
+  // 同一门课每周重复出现，按「星期几 + 课程 + 节次 + 地点」去重后只列一条，并记下跨越的周次
   const byWeekday = useMemo(() => {
     const map = new Map<number, Map<string, Slot>>();
     for (const e of entries) {
@@ -83,17 +85,22 @@ export default function ScheduleScreen() {
         row = new Map();
         map.set(wd, row);
       }
-      if (!row.has(key)) {
-        row.set(key, {
-          key,
-          title: e.title,
-          course: e.coursename,
-          time: e.time ?? '',
-          place: e.place ?? '',
-          teacher: e.teacher ?? '',
-          kind: e.kind,
-        });
+      const wk = e.weekFrom ?? e.weekTo;
+      const hit = row.get(key);
+      if (hit) {
+        if (wk !== undefined && !hit.weeks.includes(wk)) hit.weeks.push(wk);
+        continue;
       }
+      row.set(key, {
+        key,
+        title: e.title,
+        course: e.coursename,
+        time: e.time ?? '',
+        place: e.place ?? '',
+        teacher: e.teacher ?? '',
+        kind: e.kind,
+        weeks: wk === undefined ? [] : [wk],
+      });
     }
     return map;
   }, [entries]);
@@ -145,29 +152,30 @@ export default function ScheduleScreen() {
           return (
             <View key={wd} style={s.dayBlock}>
               <Text style={s.dayTitle}>星期{WEEK_LABELS[wd]}</Text>
-              {slots.map((slot) => (
-                <View key={slot.key} style={s.slotRow}>
-                  <View
-                    style={[
-                      s.kindBadge,
-                      slot.kind === 'theory' && s.kindTheory,
-                      slot.kind === 'duty' && s.kindDuty,
-                    ]}
-                  >
-                    <Text style={s.kindBadgeText}>{kindLabel(slot.kind)}</Text>
+              {slots.map((slot) => {
+                // 课程（理论课）连同它的作业一律用蓝色，实验用橙色——两类事情在色上一眼分开
+                const isCourse = slot.kind === 'theory';
+                const weeks = weeksLabel(slot.weeks);
+                return (
+                  <View key={slot.key} style={[s.slotRow, isCourse && s.slotRowCourse]}>
+                    <View style={[s.kindBadge, isCourse && s.kindTheory, slot.kind === 'duty' && s.kindDuty]}>
+                      <Text style={s.kindBadgeText}>{kindLabel(slot.kind)}</Text>
+                    </View>
+                    <View style={s.slotMain}>
+                      <Text style={[s.slotTitle, isCourse && s.slotTitleCourse]}>{slot.title}</Text>
+                      {!!slot.course && slot.course !== slot.title && (
+                        <Text style={s.slotMeta}>{slot.course}</Text>
+                      )}
+                      {!!(slot.time || weeks) && (
+                        <Text style={s.slotMeta}>{[slot.time, weeks].filter(Boolean).join(' · ')}</Text>
+                      )}
+                      {/* 教室单独一行：没有也要看得出是数据没给，而不是和节次挤在一起 */}
+                      {!!slot.place && <Text style={s.slotPlace}>教室：{slot.place}</Text>}
+                      {!!slot.teacher && <Text style={s.slotMeta}>{slot.teacher}</Text>}
+                    </View>
                   </View>
-                  <View style={s.slotMain}>
-                    <Text style={s.slotTitle}>{slot.title}</Text>
-                    {!!slot.course && slot.course !== slot.title && (
-                      <Text style={s.slotMeta}>{slot.course}</Text>
-                    )}
-                    {!!(slot.time || slot.place) && (
-                      <Text style={s.slotMeta}>{[slot.time, slot.place].filter(Boolean).join(' · ')}</Text>
-                    )}
-                    {!!slot.teacher && <Text style={s.slotMeta}>{slot.teacher}</Text>}
-                  </View>
-                </View>
-              ))}
+                );
+              })}
             </View>
           );
         })
@@ -221,7 +229,11 @@ const createStyles = (COLORS: Palette) =>
       borderBottomWidth: 1,
       borderBottomColor: COLORS.border,
       gap: SPACING.sm,
+      borderLeftWidth: 3,
+      borderLeftColor: CALENDAR_COLORS.experiment,
     },
+    // 课程（理论课）整行改蓝：左侧色条 + 徽标 + 标题同色，一眼与实验分开
+    slotRowCourse: { borderLeftColor: CALENDAR_COLORS.theory },
     kindBadge: {
       backgroundColor: CALENDAR_COLORS.experiment,
       paddingHorizontal: 6,
@@ -233,6 +245,8 @@ const createStyles = (COLORS: Palette) =>
     kindBadgeText: { color: '#fff', fontSize: 11, fontWeight: '600' },
     slotMain: { flex: 1 },
     slotTitle: { fontSize: 14, color: COLORS.text, fontWeight: '600' },
+    slotTitleCourse: { color: CALENDAR_COLORS.theory },
+    slotPlace: { fontSize: 12, color: COLORS.textSecondary, marginTop: 2 },
     slotMeta: { fontSize: 12, color: COLORS.textLight, marginTop: 2 },
     backBtn: {
       borderWidth: 1,

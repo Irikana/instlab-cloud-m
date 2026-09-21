@@ -78,6 +78,16 @@ jobs:
       - name: Verify Expo CLI
         run: npx expo --version
 
+      # expo prebuild 会按 app.json 生成 android/app/build.gradle；不在前面注入的话
+      # versionCode 永远是 1，Android 视所有构建为同一版本（详见 scripts/ci-version.js）
+      - name: Inject build number
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            node scripts/ci-version.js "${{ github.run_number }}" --official
+          else
+            node scripts/ci-version.js "${{ github.run_number }}"
+          fi
+
       - name: Generate native Android project
         run: npx expo prebuild --platform android --no-install --clean
 
@@ -125,7 +135,9 @@ jobs:
               if [ -n "${INPUT_TAG:-}" ]; then
                 t="$INPUT_TAG"; clobber=yes
               else
-                t="v$(node -p "require('./package.json').version")"; clobber=no
+                # 取三位正式版本号：package.json 此刻可能已被注入成 A.B.C-<构建号>
+                raw=$(node -p "require('./package.json').version")
+                t="v${raw%%-*}"; clobber=no
               fi ;;
           esac
           echo "tag=$t" >> "$GITHUB_OUTPUT"

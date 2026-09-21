@@ -1,8 +1,8 @@
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
-import { File, Paths } from 'expo-file-system';
 import { post } from './api';
 import { KATEX_CSS } from './katex-styles';
+import { shareJson, shareText } from './share';
 import {
   contentPaddingCss,
   parseH2pArgs,
@@ -559,19 +559,6 @@ export function printPageSize(g: PaperGeometry): { width: number; height: number
 
 // ========== 导出 ==========
 
-const safeName = (n: string) => n.replace(/[\\/:*?"<>|]/g, '_');
-
-async function shareText(content: string, fileName: string, mimeType: string) {
-  const file = new File(Paths.cache, safeName(fileName));
-  file.write(content);
-  let shared = false;
-  if (await Sharing.isAvailableAsync()) {
-    await Sharing.shareAsync(file.uri, { mimeType, dialogTitle: fileName });
-    shared = true;
-  }
-  return { uri: file.uri, shared };
-}
-
 /** 服务器原样返回的作业纸 HTML（未套手机端样式），用于与电脑版对照排查 */
 export async function downloadRawHtml(payload: PaperPayload, fileName: string) {
   return shareText(payload.html ?? '', fileName, 'text/html');
@@ -579,7 +566,7 @@ export async function downloadRawHtml(payload: PaperPayload, fileName: string) {
 
 /** 服务器完整响应（含 h2pargs / data），用于分析字段 */
 export async function downloadRawJson(payload: PaperPayload, fileName: string) {
-  return shareText(JSON.stringify(payload, null, 2), fileName, 'application/json');
+  return shareJson(payload, fileName);
 }
 
 /**

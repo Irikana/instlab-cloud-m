@@ -36,6 +36,7 @@ import {
   type PaperKind,
 } from '../src/lib/paper';
 import { isUnauthorized } from '../src/lib/api';
+import { shareJson } from '../src/lib/share';
 
 type Mode = 'calendar' | 'schid';
 
@@ -294,6 +295,22 @@ export default function PaperDownloadScreen() {
             <Pressable style={s.refreshBtn} onPress={reload} disabled={loading}>
               <Text style={s.refreshText}>刷新</Text>
             </Pressable>
+            {/* 学期与日程的原始字段：教室、周次这些对不上号时靠它确认服务器到底给了什么 */}
+            {devMode && (
+              <Pressable
+                style={s.refreshBtn}
+                onPress={() => {
+                  void shareJson(
+                    { term: terms.find((t) => t.id === termId) ?? null, terms, entries },
+                    `日程_${termName || termId || '未选学期'}.json`,
+                  ).then((r) =>
+                    Alert.alert('日程 JSON 已导出', r.shared ? '请在系统分享面板中选择保存位置。' : r.uri),
+                  );
+                }}
+              >
+                <Text style={s.refreshText}>日程JSON</Text>
+              </Pressable>
+            )}
           </View>
 
           {/* 日历 */}
