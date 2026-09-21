@@ -29,7 +29,6 @@
   "devDependencies": {
     "@babel/core": "^7.27.1",
     "@types/react": "~19.2.2",
-    "subset-font": "^2.7.0",
     "typescript": "~6.0.3"
   },
   "scripts": {

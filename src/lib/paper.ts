@@ -478,24 +478,47 @@ export function buildPaginateScript(opts: PaperRenderOptions): string {
       var out = paginateUnits(units, CONTENT_PX);
       var wrapped = [];
       for (var pi = 0; pi < out.length; pi++) wrapped.push('<div style="' + PADDING + '">' + out[pi] + '</div>');
-      var msg = JSON.stringify({ icm: 'pages', pages: wrapped });
-      if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) window.ReactNativeWebView.postMessage(msg);
-      else if (window.parent && window.parent.postMessage) window.parent.postMessage(msg, '*');
+      report(JSON.stringify({ icm: 'pages', pages: wrapped }));
     }
 
-    // 等注入的 KaTeX / 中文字体真正生效后再量高度，否则会按兜底字体的行高分页，
-    // 打印时字体一到、内容下沉，页码和条码就跟版面对不上了。
+    // 回传与报错都要在定时器回调里也生效：injectedJavaScript 可能在 document.body
+    // 就绪前就执行，抛在 setTimeout 里的错进不了外层 try/catch，就变成"既不报错也不回传"，
+    // 界面安静地卡在测量页——真机上看到的就是"和以前一样"。
+    function report(msg) {
+      try {
+        if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) window.ReactNativeWebView.postMessage(msg);
+        else if (window.parent && window.parent.postMessage) window.parent.postMessage(msg, '*');
+      } catch (e) { /* 传不出去也没别的地方可报 */ }
+    }
+    function fail(e) { report('__PAGINATE_ERROR__' + String((e && e.message) || e)); }
+    function guard(fn) { return function () { try { fn(); } catch (e) { fail(e); } }; }
+
     var started = false;
     function start() {
       if (started) return;
       started = true;
-      setTimeout(measure, 80);
+      // 等 body 及其正文真的出现再量，最多重试 20 次（每次 150ms）
+      var tries = 0;
+      function attempt() {
+        try {
+          var b = document.body;
+          if (!b || b.children.length === 0) {
+            if (++tries < 20) { setTimeout(attempt, 150); return; }
+            report('__PAGINATE_ERROR__文档一直没有正文内容');
+            return;
+          }
+          measure();
+        } catch (e) { fail(e); }
+      }
+      setTimeout(attempt, 80);
     }
+    // 等注入的 KaTeX / 中文字体真正生效后量高度，否则按兜底字体的行高分页，
+    // 打印时字体一到、内容下沉，页码和条码就跟版面对不上了
     if (document.fonts && document.fonts.ready && document.fonts.ready.then) {
-      document.fonts.ready.then(start);
-      setTimeout(start, 1500);
+      document.fonts.ready.then(guard(start));
+      setTimeout(guard(start), 1500);
     } else {
-      setTimeout(start, 400);
+      setTimeout(guard(start), 400);
     }
   } catch (e) {
     var err = '__PAGINATE_ERROR__' + String(e && e.message || e);

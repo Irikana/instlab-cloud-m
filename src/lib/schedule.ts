@@ -38,6 +38,8 @@ export interface ScheduleEntry {
   dutystatus?: boolean;
   /** 成绩（教师评分） */
   mark?: string | number;
+  /** 是否已被批过（mark1..mark5 任一非空；各项含义无依据，不猜具体分数） */
+  marked?: boolean;
   /** 起始周 / 结束周；服务器没给、也推不出来时保持 undefined */
   weekFrom?: number;
   weekTo?: number;
@@ -85,17 +87,23 @@ export function todayStr(): string {
   return formatDate(new Date());
 }
 
-/** 从原始条目提取通用字段 */
-function extractEntry(raw: Record<string, unknown>): ScheduleEntry | null {
+/**
+ * 从原始条目提取通用字段。
+ * @param srcKind 来源接口给出的类型：日程条目里没有任何类型字段（实测 raw 只有
+ * sch_date/sch_time 这些），实验与理论课的区分只存在于它是哪个接口返回的，
+ * 所以必须由调用方告知，不能靠猜——之前全部落到 experiment，
+ * 结果课程表里理论课也被标成橙色，蓝色标注永远出不来。
+ */
+export function extractEntry(raw: Record<string, unknown>, srcKind?: string): ScheduleEntry | null {
   const schid = String(raw.schid ?? raw.id ?? raw.sch_id ?? '');
   const date = normalizeDate(raw.sch_date ?? raw.coursedatetime ?? raw.schdatetime ?? raw.date ?? raw.dates);
   if (!schid || !date) return null;
 
   const kindRaw = String(raw.sch_type ?? raw.type ?? raw.kind ?? raw.plan_type ?? '').toLowerCase();
-  let kind = 'unknown';
-  if (/duty|值日|clean/.test(kindRaw)) kind = 'duty';
+  let kind = srcKind ?? 'unknown';
+  if (/duty|值日|clean/.test(kindRaw) || raw.dutystatus === 1) kind = 'duty';
   else if (/theory|th|理论/.test(kindRaw)) kind = 'theory';
-  else if (/exp|lab|实验/.test(kindRaw) || !kindRaw) kind = 'experiment';
+  else if (/exp|lab|实验/.test(kindRaw)) kind = 'experiment';
 
   return {
     schid,
@@ -105,17 +113,20 @@ function extractEntry(raw: Record<string, unknown>): ScheduleEntry | null {
     date,
     dateRaw: String(raw.sch_date ?? raw.coursedatetime ?? ''),
     title: String(raw.expname ?? raw.sch_title ?? raw.title ?? raw.coursename ?? raw.expno ?? '实验安排'),
-    expno: raw.expno ? String(raw.expno) : undefined,
+    expno: raw.expno ? String(raw.expno) : (raw.expnumber ? String(raw.expnumber) : undefined),
     coursename: raw.coursename ? String(raw.coursename) : undefined,
     coursenumber: raw.coursenumber ? String(raw.coursenumber) : undefined,
     time: String(raw.coursehour ?? raw.time ?? raw.course_time ?? raw.sch_time ?? ''),
     place: String(raw.labroom ?? raw.labname ?? raw.roomname ?? raw.room ?? raw.place ?? raw.site ?? raw.address ?? ''),
     teacher: String(raw.teachername ?? raw.teacher ?? raw.teacherName ?? ''),
-    issigned: raw.time_signin != null || raw.issigned === true || raw.signed === true || raw.signined === true,
+    issigned: raw.time_signin != null || raw.signin_time != null || raw.issigned === true || raw.signed === true || raw.signined === true,
     isdata: raw.time_datapaper != null || raw.isdata === true,
     isreport: raw.time_report != null || raw.isreport === true,
     dutystatus: raw.dutystatus === 1 || raw.dutystatus === true || raw.dutystatus === '1',
+    // 真实响应里没有单一的 mark 字段，是 mark1..mark5 + premark/reportmark；
+    // 各个 mark 的语义没有依据，界面只报"有成绩"而不猜它是哪一项
     mark: raw.mark !== undefined ? (raw.mark as string | number) : undefined,
+    marked: raw.mark1 != null || raw.mark2 != null || raw.mark3 != null || raw.mark4 != null || raw.mark5 != null,
     weekFrom: pickWeek(raw, WEEK_FROM_KEYS) ?? pickWeek(raw, WEEK_ONE_KEYS),
     weekTo: pickWeek(raw, WEEK_TO_KEYS) ?? pickWeek(raw, WEEK_ONE_KEYS),
     kind,
@@ -142,26 +153,32 @@ function pickWeek(raw: Record<string, unknown>, keys: string[]): number | undefi
   return undefined;
 }
 
-/** 学期起始日：服务器给的学期对象里可能带着起止日期，字段名同样按几种写法试 */
-const TERM_START_KEYS = ['start_date', 'startdate', 'start_time', 'starttime', 'begin_date', 'begindate', 'begin_time', 'sdate', 'start'];
-const TERM_END_KEYS = ['end_date', 'enddate', 'end_time', 'endtime', 'finish_date', 'finishdate', 'edate', 'end'];
+/** 学期起始日：真实字段是 date_start / date_end（ISO UTC 串），候选名一并容错 */
+const TERM_START_KEYS = ['date_start', 'start_date', 'startdate', 'start_time', 'starttime', 'begin_date', 'begindate', 'begin_time', 'sdate', 'start'];
+const TERM_END_KEYS = ['date_end', 'end_date', 'enddate', 'end_time', 'endtime', 'finish_date', 'finishdate', 'edate', 'end'];
 
-export function termStartDate(t: Term): number | null {
-  const raw = (t.raw ?? {}) as Record<string, unknown>;
-  for (const k of TERM_START_KEYS) {
-    const ms = Date.parse(String(raw[k] ?? ''));
-    if (raw[k] && !isNaN(ms)) return ms;
+/** 学期对象的附加字段来源：既看 fetchTermList 挂上的 raw，也看学期对象本身 */
+function termExtras(t: Term): Record<string, unknown> {
+  return { ...(t as unknown as Record<string, unknown>), ...(t.raw ?? {}) };
+}
+
+function pickTermDate(t: Term, keys: string[]): number | null {
+  const src = termExtras(t);
+  for (const k of keys) {
+    const v = src[k];
+    if (v === undefined || v === null || v === '') continue;
+    const ms = Date.parse(String(v));
+    if (!isNaN(ms)) return ms;
   }
   return null;
 }
 
+export function termStartDate(t: Term): number | null {
+  return pickTermDate(t, TERM_START_KEYS);
+}
+
 export function termEndDate(t: Term): number | null {
-  const raw = (t.raw ?? {}) as Record<string, unknown>;
-  for (const k of TERM_END_KEYS) {
-    const ms = Date.parse(String(raw[k] ?? ''));
-    if (raw[k] && !isNaN(ms)) return ms;
-  }
-  return null;
+  return pickTermDate(t, TERM_END_KEYS);
 }
 
 /** 第a-b周 / 第a周；一个周次都没有时返回空串（由界面决定不显示，而不是编一个） */
@@ -203,17 +220,20 @@ export async function fetchScheduleEntries(termId: string, termStartMs?: number 
   const entries: ScheduleEntry[] = [];
   const params = `termid=${encodeURIComponent(termId)}&collegeid=0&type=schedule`;
 
-  const collect = async (path: string) => {
+  const collect = async (path: string, srcKind: string) => {
     const r = await get<unknown[] | { list_data?: unknown[] }>(path);
     const list = Array.isArray(r) ? (r as unknown[]) : (r as { list_data?: unknown[] }).list_data ?? [];
     entries.push(...list
-      .map((it) => extractEntry(it as Record<string, unknown>))
+      .map((it) => extractEntry(it as Record<string, unknown>, srcKind))
       .filter((e): e is ScheduleEntry => e !== null));
   };
 
   // 两个日程接口分别对应实验与理论课；只有一个可用是正常情况（例如学生账号没有理论课），
   // 但两个都失败时必须把错误抛出去——否则界面只会显示一张空白日历，看不出是没登录。
-  const results = await Promise.allSettled([collect(`/api/schedule?${params}`), collect(`/api/scheduleth?${params}`)]);
+  const results = await Promise.allSettled([
+    collect(`/api/schedule?${params}`, 'experiment'),
+    collect(`/api/scheduleth?${params}`, 'theory'),
+  ]);
   if (results.every((r) => r.status === 'rejected')) {
     const failed = results.find((r) => r.status === 'rejected') as PromiseRejectedResult;
     throw failed.reason instanceof Error ? failed.reason : new Error('日程加载失败');

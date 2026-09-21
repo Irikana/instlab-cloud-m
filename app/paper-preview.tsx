@@ -1,7 +1,7 @@
 // 作业纸 WebView 预览 + 打印/下载（模拟 PC 端 WebView2 行为）
 // 流程：调 API → 读 h2pargs 定版心 → buildBaseDocument → WebView 测量分页 → 打印或下载 PDF
 // 分页与打印共用同一份文档，不再存在第二条出图路径。
-import React, { useEffect, useState } from 'react';
+import React, { createRef, useCallback, useEffect, useRef, useState, type ComponentRef } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -71,6 +71,9 @@ export default function PaperPreviewScreen() {
   const [notice, setNotice] = useState<string | null>(null);
   /** 作业 ID 取自哪个字段，显示出来便于和电脑版核对 */
   const [idSource, setIdSource] = useState('');
+  /** 测量 WebView 与"只注入一次"的标记 */
+  const measureRef = createRef<ComponentRef<typeof WebView>>();
+  const injectedRef = useRef(false);
 
   // 加载作业纸
   useEffect(() => {
@@ -92,6 +95,7 @@ export default function PaperPreviewScreen() {
     setPageCount(0);
     setNotice(null);
     setIdSource('');
+    injectedRef.current = false;
     try {
       const payload = await fetchPaper(kind, requestData);
       const html = payload.html ?? '';
@@ -142,6 +146,20 @@ export default function PaperPreviewScreen() {
     setPageCount(msg.pages.length);
     setMeasured(true);
   };
+
+  /**
+   * 看门狗：测量脚本万一没回传（WebView 被系统回收、脚本被更早地打断等），
+   * 不能永远停在测量页上什么都不说。超时就用连续文档兜底并写明原因。
+   */
+  useEffect(() => {
+    if (loading || measured || !baseDoc || !opts) return;
+    const t = setTimeout(() => {
+      setPrintDoc(withFlatHeader(baseDoc, opts));
+      setNotice('测量分页没有回应，已退回连续文档；打印时由分页器自行断页。');
+      setMeasured(true);
+    }, 12000);
+    return () => clearTimeout(t);
+  }, [loading, measured, baseDoc, opts]);
 
   /** 手机屏上把一版宽度的文档缩到屏幕宽（仅展示阶段，不影响打印产物） */
   const pageWidthPx = opts ? Math.round(opts.geometry.pageWidthPx) : Math.round(mmToPx(210));
@@ -226,7 +244,10 @@ export default function PaperPreviewScreen() {
         </View>
       ) : opts && baseDoc && !measured ? (
         // 第一遍：按 h2pargs 给出的版心测量分页，生成逐页条码
+        // 用 onLoadEnd 之后再注入，而不是 injectedJavaScript：后者在 Android 上可能
+        // 早于文档解析完成，量到空 body 就再也不回传，界面会安静地卡在这一页
         <WebView
+          ref={measureRef}
           style={s.webview}
           source={{ html: baseDoc }}
           originWhitelist={['*']}
@@ -240,7 +261,11 @@ export default function PaperPreviewScreen() {
               style={s.webviewLoading}
             />
           )}
-          injectedJavaScript={buildPaginateScript(opts)}
+          onLoadEnd={() => {
+            if (injectedRef.current) return;
+            injectedRef.current = true;
+            measureRef.current?.injectJavaScript(buildPaginateScript(opts) + ';true;');
+          }}
           onMessage={onMeasureMessage}
           onError={() => setError('WebView 加载失败')}
         />
