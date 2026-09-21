@@ -326,12 +326,12 @@ function barcodeHtml(value: string, g: PaperGeometry): string {
 // ========== 分页 ==========
 
 /**
- * 可分页单元。
- * h        = 高度（CSS px）
- * html     = 该单元的完整 HTML
- * kids     = 可再拆的子单元
- * wrap     = 用同样的外层标签把一段子块包回来
- * shellId  = 同属一个父元素的片段共享的编号，用于把相邻片段并回一个外壳
+ * 可分页单元（DOM 侧喂进来的形状）。
+ * h       = 高度（CSS px）
+ * html    = 该单元的完整 HTML
+ * kids    = 可再拆的子单元
+ * wrap    = 用同样的外层标签把一段内部 HTML 包回来
+ * shellId = 外层标签的身份，用于认出"来自同一个父元素"的片段
  */
 export interface PackUnit {
   h: number;
@@ -341,40 +341,54 @@ export interface PackUnit {
   shellId?: number;
 }
 
-/**
- * 把版面单元摊平成"一页装得下"的片段序列。
- * 电脑版的出图引擎是按行连续断页的，手机端此前只在顶层块之间断，
- * 一道大题装不进剩余空间时整块挪到下一页，页底就会留出一大段空白、
- * 分页落点与电脑版对不上。这里允许往下拆一层，并用同样的外层标签
- * 把片段包回来（表格的边框、单元格样式才不会丢）。
- * 子单元撑不满一页或只有一个子块时不拆，避免把不该分的东西切开。
- */
-export function flattenUnits(units: PackUnit[], pageH: number): PackUnit[] {
-  const out: PackUnit[] = [];
-  for (const item of units) {
-    const kids = item.kids ?? [];
-    if (item.h <= pageH || kids.length < 2 || !item.wrap) {
-      out.push({ h: item.h, html: item.html });
-      continue;
-    }
-    for (const frag of flattenUnits(kids, pageH)) {
-      out.push({
-        h: frag.h,
-        html: frag.html,
-        wrap: item.wrap,
-        shellId: item.shellId,
-      });
-    }
-  }
-  return out;
+/** 一层外壳：id 用来认出同一个父元素，wrap 用来把内部 HTML 包回来 */
+interface Shell {
+  id: number;
+  wrap: (inner: string) => string;
 }
 
-/** 贪婪装页：一块一页放不下就另起一页；单块超过一页时独占一页（与引擎行为一致） */
-export function packUnitsToPages(units: PackUnit[], pageH: number): PackUnit[][] {
-  const pages: PackUnit[][] = [];
-  let cur: PackUnit[] = [];
+/** 装页用的最小片段：只存最里面的 HTML 和从外到内的外壳链 */
+export interface PackAtom {
+  h: number;
+  inner: string;
+  chain: Shell[];
+}
+
+/**
+ * 按 h2pargs 给出的版心把版面单元切成一页一页，返回每页的 innerHTML。
+ *
+ * 为什么整个算法写在同一个函数里：它要原样注入到测量 WebView 中执行
+ * （buildPaginateScript 用 fn.toString() 搬过去），而 toString() 搬不走模块级
+ * 的兄弟函数——上次就是这么把 chainKey 落在外面，measure() 在定时器里抛
+ * ReferenceError、既不进 catch 也不回传，结果预览永远停在测量页，
+ * 抬头图、条码、码下数字、页数一并消失。自包含就没有"忘了带上谁"这类错。
+ *
+ * 分页规则与电脑版的差异此前出在两处：
+ * 一是引擎按行连续断页而手机端只在顶层块之间断，装不下的整块被挪页、
+ * 超过一页高度的块更会被 .paper-page 的 overflow:hidden 裁掉，内容凭空消失；
+ * 二是拆开的片段若各自套一层外壳，同一张表格的两行会变成两张表。
+ * 所以这里一路向下拆到装得下为止（真实作业纸是 table>tbody>tr>td>… 每层
+ * 常常只有一个孩子，单子块也要下钻），再把相邻同链的片段并回同一个外壳。
+ */
+export function paginateUnits(units: PackUnit[], pageH: number): string[] {
+  const flatten = (item: PackUnit, chain: Shell[]): PackAtom[] => {
+    if (item.h <= pageH) return [{ h: item.h, inner: item.html, chain }];
+    const kids = item.kids ?? [];
+    if (!kids.length || !item.wrap) return [{ h: item.h, inner: item.html, chain }];
+    const next = chain.concat({ id: item.shellId ?? 0, wrap: item.wrap });
+    const frags = kids.reduce<PackAtom[]>((acc, k) => acc.concat(flatten(k, next)), []);
+    // 拆完还是同样高、同样一段：这条链上没有可断点，整块原样交出去
+    if (frags.length === 1 && Math.abs(frags[0].h - item.h) < 1 && frags[0].chain.length === next.length) {
+      return [{ h: item.h, inner: item.html, chain }];
+    }
+    return frags;
+  };
+  const atoms = units.reduce<PackAtom[]>((acc, u) => acc.concat(flatten(u, [])), []);
+
+  const pages: PackAtom[][] = [];
+  let cur: PackAtom[] = [];
   let used = 0;
-  for (const item of units) {
+  for (const item of atoms) {
     if (cur.length > 0 && used + item.h > pageH) {
       pages.push(cur);
       cur = [];
@@ -384,40 +398,25 @@ export function packUnitsToPages(units: PackUnit[], pageH: number): PackUnit[][]
     used += item.h;
   }
   if (cur.length > 0 || pages.length === 0) pages.push(cur);
-  return pages;
-}
 
-/**
- * 把一页里的片段拼成 HTML。
- * 来自同一个父元素（同一张表格）的相邻片段必须并回同一个外壳：
- * 一人包一个 <table> 会画成两张表，单元格边框与行距就和电脑版对不上了。
- */
-export function renderPageUnits(units: PackUnit[]): string {
-  let out = '';
-  let buf = '';
-  let shellId = -2;
-  let shellWrap: ((inner: string) => string) | null = null;
-  const flush = () => {
-    if (!buf) return;
-    out += shellWrap ? shellWrap(buf) : buf;
-    buf = '';
-  };
-  for (const u of units) {
-    const id = u.wrap ? (u.shellId ?? -1) : -2;
-    if (id !== shellId) {
-      flush();
-      shellId = id;
-      shellWrap = u.wrap ?? null;
+  return pages.map((page) => {
+    let out = '';
+    let i = 0;
+    while (i < page.length) {
+      const key = page[i].chain.map((c) => c.id).join('>');
+      let buf = page[i].inner;
+      let j = i + 1;
+      while (j < page.length && page[j].chain.map((c) => c.id).join('>') === key) {
+        buf += page[j].inner;
+        j += 1;
+      }
+      const chain = page[i].chain;
+      for (let k = chain.length - 1; k >= 0; k--) buf = chain[k].wrap(buf);
+      out += buf;
+      i = j;
     }
-    buf += u.html;
-  }
-  flush();
-  return out;
-}
-
-/** 把 PackUnit 序列摊平+装页，直接返回每页的 innerHTML 数组 */
-export function paginateUnits(units: PackUnit[], pageH: number): string[] {
-  return packUnitsToPages(flattenUnits(units, pageH), pageH).map(renderPageUnits);
+    return out;
+  });
 }
 
 /**
@@ -431,10 +430,8 @@ export function buildPaginateScript(opts: PaperRenderOptions): string {
   try {
     var CONTENT_PX = ${g.contentHeightPx};
     var PADDING = ${JSON.stringify(contentPaddingCss(g))};
-    // 摊平与装页的算法与手机端共用同一份实现（导出函数按名注入，paginateUnits 内部按名调用前两个）
-    var flattenUnits = ${flattenUnits.toString()};
-    var packUnitsToPages = ${packUnitsToPages.toString()};
-    var renderPageUnits = ${renderPageUnits.toString()};
+    // 分页算法与手机端共用同一份实现：paginateUnits 是自包含的，整个函数搬过来即可，
+    // 不再有需要按名注入的兄弟函数（历史教训见 paginateUnits 的注释）
     var paginateUnits = ${paginateUnits.toString()};
 
     function measure() {
@@ -458,7 +455,8 @@ export function buildPaginateScript(opts: PaperRenderOptions): string {
           var k = toUnit(c);
           if (k.h > 0.5) kids.push(k);
         }
-        var shellId = kids.length > 1 ? ++shellSeq : undefined;
+        // 每个元素都要有独立编号：拆页时靠它认出哪些片段同属一个父元素，相邻的才能并回同一层外壳
+        var shellId = ++shellSeq;
         return {
           h: r ? r.height : 0,
           html: el.outerHTML,
